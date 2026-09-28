@@ -6,6 +6,7 @@ If `frontend/dist` exists (after `npm run build`) it is served from the same
 origin, so the whole product runs on a single port.
 """
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -36,9 +37,37 @@ _MAX_BODY_BYTES = 20 * 1024 * 1024
 _DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
+def _install_windows_disconnect_handler() -> None:
+    """Keep normal Windows client disconnects out of the console log.
+
+    Python's Proactor event loop can report WinError 10054 when a browser
+    closes/reloads a local HTTP connection while the socket is being torn
+    down. The request has already ended; there is no application failure to
+    recover from. Other loop exceptions still use asyncio's normal handler.
+    """
+    if os.name != "nt":
+        return
+
+    loop = asyncio.get_running_loop()
+
+    def handler(current_loop, context):
+        exc = context.get("exception")
+        message = context.get("message", "")
+        winerror = getattr(exc, "winerror", None)
+        if (isinstance(exc, ConnectionResetError) and winerror == 10054) or (
+            message == "Exception in callback _ProactorBasePipeTransport._call_connection_lost()"
+            and isinstance(exc, ConnectionResetError)
+        ):
+            return
+        current_loop.default_exception_handler(context)
+
+    loop.set_exception_handler(handler)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    _install_windows_disconnect_handler()
     yield
 
 

@@ -11,6 +11,41 @@ export const SEV_COLOR = {
 };
 export const STATUS_LABEL = { open: "Open", in_review: "In review", closed: "Closed" };
 
+export const RULE_LABEL = {
+  suspicious_module_loads: "Suspicious module load",
+  dll_sideloading: "Possible DLL sideloading",
+  process_hollowing_indicators: "Process hollowing indicator",
+  reflective_load_indicators: "Reflective loading indicator",
+  thread_hijacking_indicators: "Thread start anomaly",
+  injection_correlation: "Injection evidence correlation",
+};
+
+export function humanizeRule(name) {
+  if (RULE_LABEL[name]) return RULE_LABEL[name];
+  return String(name || "Unknown rule")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+export const COLLECTOR_LABEL = {
+  system_info: "System information",
+  processes: "Processes",
+  network_connections: "Network connections",
+  logged_in_users: "Logged-in users",
+  file_hash: "File hashes",
+  scheduled_tasks: "Scheduled tasks",
+  startup_items: "Startup items",
+  open_files: "Open files",
+  local_users: "Local users",
+  modules: "Loaded DLLs / modules",
+  threads: "Process threads",
+  memory_regions: "Virtual memory regions",
+};
+
+export function humanizeCollector(name) {
+  return COLLECTOR_LABEL[name] || humanizeRule(name);
+}
+
 export const fmtTime = (iso) => {
   if (!iso) return "-";
   const d = new Date(iso);
@@ -73,6 +108,22 @@ export const TEMPLATES = {
     analyze suspicious_startup_items;
     analyze privileged_user_anomaly;
     report "adaptive_triage";
+}
+`,
+  "Windows injection hunt": `investigation "Windows Injection Forensics" {
+    collect system_info;
+    collect processes;
+    collect modules;
+    collect threads;
+    collect memory_regions;
+    collect network_connections;
+    analyze suspicious_module_loads;
+    analyze dll_sideloading;
+    analyze process_hollowing_indicators;
+    analyze reflective_load_indicators;
+    analyze thread_hijacking_indicators;
+    analyze injection_correlation;
+    report "windows_injection_forensics";
 }
 `,
   "Evidence file hashing": `investigation "Evidence Hashing" {

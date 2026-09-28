@@ -4,6 +4,20 @@ import { useLoad } from "../hooks";
 import { Empty, Loading, Notice, SevChips, Pill } from "../components/ui";
 import { SEVERITIES, SEV_COLOR, SEV_LABEL, fmtTime } from "../lib";
 
+const INJECTION_RULES = new Set([
+  "suspicious_module_loads", "dll_sideloading", "process_hollowing_indicators",
+  "reflective_load_indicators", "thread_hijacking_indicators", "injection_correlation",
+]);
+
+function injectionSummary(record) {
+  const report = record?.report_json;
+  const findings = (report?.findings || []).filter((f) => INJECTION_RULES.has(f.rule_name));
+  const modules = report?.collector_results?.find((c) => c.target === "modules")?.data?.count || 0;
+  const threads = report?.collector_results?.find((c) => c.target === "threads")?.data?.count || 0;
+  const regions = report?.collector_results?.find((c) => c.target === "memory_regions")?.data?.count || 0;
+  return { findings, modules, threads, regions };
+}
+
 export default function Dashboard() {
   const stats = useLoad(() => api.stats(), [], 15_000);
   const list = useLoad(() => api.investigations(), []);
@@ -16,6 +30,9 @@ export default function Dashboard() {
   const urgent = (sev.critical || 0) + (sev.high || 0);
   const maxRule = Math.max(1, ...s.top_rules.map((r) => r.count));
   const recent = (list.data || []).slice(0, 8);
+  const injectionRuns = (list.data || []).map((r) => ({ record: r, ...injectionSummary(r) }));
+  const injectionFindingCount = injectionRuns.reduce((n, x) => n + x.findings.length, 0);
+  const injectionTelemetryRuns = injectionRuns.filter((x) => x.modules || x.threads || x.regions).length;
 
   return (
     <>
@@ -99,11 +116,30 @@ export default function Dashboard() {
             </div>
           </div>
 
+          <div className="panel injection-banner" style={{ marginBottom: 12 }}>
+            <div className="panel-b">
+              <div>
+                <div className="injection-kicker">Windows endpoint telemetry</div>
+                <div className="injection-title">DLL / injection analysis</div>
+                <p className="injection-copy">JOCKY correlates loaded modules, thread start addresses and private executable memory to surface DLL sideloading, hollowing, reflective-loading and thread-hijacking indicators.</p>
+                <div className="row" style={{ marginTop: 9 }}>
+                  <Link to="/injection" className="btn primary sm">Open injection analysis</Link>
+                  <span style={{ color: "var(--muted)", fontSize: 11 }}>{injectionFindingCount} injection indicator{injectionFindingCount === 1 ? "" : "s"} across stored cases</span>
+                </div>
+              </div>
+              <div className="injection-coverage">
+                <div className="coverage-cell"><b>{injectionTelemetryRuns}</b><span>Runs with telemetry</span></div>
+                <div className="coverage-cell"><b>{injectionRuns.reduce((n,x) => n+x.modules,0)}</b><span>Modules observed</span></div>
+                <div className="coverage-cell"><b>{injectionRuns.reduce((n,x) => n+x.regions,0)}</b><span>Memory regions</span></div>
+              </div>
+            </div>
+          </div>
+
           <div className="panel">
             <div className="panel-h"><h3>Recent investigations</h3><Link to="/investigations">View all</Link></div>
             <div className="tbl-wrap">
               <table className="t">
-                <thead><tr><th>Name</th><th>Endpoint</th><th>Started</th><th>C / H / M</th><th>Findings</th><th>Status</th></tr></thead>
+                <thead><tr><th>Name</th><th>Endpoint</th><th>Started</th><th>C / H / M</th><th>Findings</th><th>DLL / injection</th><th>Status</th></tr></thead>
                 <tbody>
                   {recent.map((r) => (
                     <tr key={r.id}>
@@ -112,6 +148,7 @@ export default function Dashboard() {
                       <td className="num">{fmtTime(r.started_at)}</td>
                       <td><SevChips counts={r.severity_counts} /></td>
                       <td className="num">{r.findings_count}</td>
+                      <td>{injectionSummary(r).findings.length ? <span className="badge sev-high">{injectionSummary(r).findings.length} indicators</span> : injectionSummary(r).modules ? <span className="badge sev-review_recommended">Telemetry</span> : <span style={{ color: "var(--dim)" }}>—</span>}</td>
                       <td><Pill value={r.status} /></td>
                     </tr>
                   ))}

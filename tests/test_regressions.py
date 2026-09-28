@@ -115,3 +115,36 @@ def test_job_cap_evicts_finished_jobs(monkeypatch):
         agent_store.submit_job_result(job.job_id, {})
     agent_store.dispatch_job(aid, "s")            # would previously raise forever
     assert len(agent_store._jobs) == 3
+
+# ── Windows injection-forensics surface ──────────────────────────────────────
+def test_injection_collectors_are_registered_and_safe_on_non_windows():
+    from jocky.collectors.registry import is_known_collector, get_collector
+    assert is_known_collector("modules")
+    assert is_known_collector("threads")
+    assert is_known_collector("memory_regions")
+    if os.name != "nt":
+        assert get_collector("modules")()["supported"] is False
+        assert get_collector("threads")()["supported"] is False
+        assert get_collector("memory_regions")()["supported"] is False
+
+
+def test_injection_rules_are_allowlisted():
+    from jocky.analysis.registry import is_known_rule
+    for name in (
+        "suspicious_module_loads", "dll_sideloading",
+        "process_hollowing_indicators", "reflective_load_indicators",
+        "thread_hijacking_indicators", "injection_correlation",
+    ):
+        assert is_known_rule(name)
+
+
+def test_injection_correlation_uses_independent_evidence():
+    from jocky.analysis.injection_rules import rule_injection_correlation
+    evidence = {
+        "modules": {"modules": [{"pid": 123, "is_user_writable": True}]},
+        "memory_regions": {"regions": [{"pid": 123, "is_private_executable": True}]},
+    }
+    findings = rule_injection_correlation(evidence)
+    assert len(findings) == 1
+    assert findings[0].rule_name == "injection_correlation"
+    assert findings[0].related_evidence["pid"] == 123

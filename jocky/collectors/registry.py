@@ -13,6 +13,9 @@ from pathlib import Path
 
 from jocky.collectors.file_hash import collect_file_hashes
 from jocky.collectors.local_users import collect_local_users
+from jocky.collectors.memory_regions import collect_memory_regions
+from jocky.collectors.modules import collect_modules
+from jocky.collectors.threads import collect_threads
 from jocky.collectors.logged_in_users import collect_logged_in_users
 from jocky.collectors.network_connections import collect_network_connections
 from jocky.collectors.open_files import collect_open_files
@@ -41,6 +44,9 @@ _COLLECTORS: dict[str, object] = {
     "startup_items":       collect_startup_items,
     "open_files":          collect_open_files,
     "local_users":         collect_local_users,
+    "modules":             collect_modules,
+    "threads":             collect_threads,
+    "memory_regions":      collect_memory_regions,
 }
 
 

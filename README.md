@@ -46,7 +46,7 @@ JOCKY lets an analyst describe an investigation in a small declarative language,
 
 ## Quick start
 
-Requirements: **Python 3.10+**. **Node.js 18+** is needed once to build the console (the API runs without it).
+Requirements: **Python 3.10+**. **Node.js 20.19+ or 22.12+** is needed to build the console (the API runs without it).
 
 ```bash
 git clone <your repository URL>
@@ -404,3 +404,62 @@ The original problem statement mentions evasion techniques such as process hollo
 - Missing bytecode key produced a bare 500; it now returns 503 with a clear message.
 - Removed a truncated deprecated encryption shim and unused imports; replaced deprecated FastAPI startup hook.
 - Removed committed generated reports from the repository and completed `.gitignore`.
+
+## Windows Injection Forensics
+
+JOCKY includes a Windows-only, read-only forensic collection and correlation pack for
+investigating injection-like activity. It covers loaded modules, process threads and
+virtual-memory region metadata and exposes the capabilities through the existing JOCKY
+DSL registry.
+
+Example:
+
+```text
+investigation "Windows Injection Forensics" {
+    collect system_info;
+    collect processes;
+    collect modules;
+    collect threads;
+    collect memory_regions;
+    collect network_connections;
+
+    analyze suspicious_module_loads;
+    analyze dll_sideloading;
+    analyze process_hollowing_indicators;
+    analyze reflective_load_indicators;
+    analyze thread_hijacking_indicators;
+    analyze injection_correlation;
+
+    report "windows_injection_forensics";
+}
+```
+
+### Safety boundary
+
+The Windows injection pack is an evidence and detection subsystem. Collectors query
+read-only process/module/thread/memory metadata. They do not write process memory,
+create remote threads, suspend threads, inject DLLs, disable security controls, or
+provide arbitrary Windows API access through the DSL. Findings describe indicators
+for analyst review rather than claiming that an injection technique is proven from
+one artifact.
+
+### Windows evidence modules
+
+- `modules` — bounded process/module inventory with SHA-256 hashing for modules in
+  commonly user-writable paths.
+- `threads` — thread inventory and read-only Windows thread start-address metadata
+  where the endpoint permits access.
+- `memory_regions` — bounded `VirtualQueryEx` metadata collection; JOCKY never reads
+  the contents of another process's memory.
+
+### Analysis rules
+
+- `suspicious_module_loads`
+- `dll_sideloading`
+- `process_hollowing_indicators`
+- `reflective_load_indicators`
+- `thread_hijacking_indicators`
+- `injection_correlation`
+
+The UI exposes these capabilities under **Injection analysis** and the New Investigation
+editor includes a **Windows injection hunt** template.

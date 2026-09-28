@@ -78,6 +78,9 @@ _EVIDENCE_PROPS: dict[tuple[str, str], Callable[[dict], Any]] = {
     ("startup_items",       "count"):     lambda d: d.get("count", 0),
     ("open_files",          "count"):     lambda d: d.get("count", 0),
     ("local_users",         "count"):     lambda d: d.get("count", 0),
+    ("modules",             "count"):     lambda d: d.get("count", 0),
+    ("threads",             "count"):     lambda d: d.get("count", 0),
+    ("memory_regions",      "count"):     lambda d: d.get("count", 0),
 }
 
 _ALLOWED_PROPS_STR = ", ".join(

@@ -16,6 +16,9 @@ _COLLECTORS = {
     "startup_items": "Run keys / startup folders (Windows), systemd and init.d (Linux).",
     "open_files": "Open file handles per process (bounded).",
     "local_users": "Local accounts from net user (Windows) or /etc/passwd (Linux).",
+    "modules": "Windows loaded DLL/EXE/SYS module inventory with bounded hashing of user-writable paths.",
+    "threads": "Windows process-thread inventory using read-only thread metadata.",
+    "memory_regions": "Windows virtual-memory metadata; no process memory is read or written.",
 }
 _RULES = {
     "missing_paths": ("informational", "Processes whose executable path is unreadable."),
@@ -25,6 +28,12 @@ _RULES = {
     "suspicious_startup_items": ("medium-critical", "Persistence outside system directories."),
     "high_connection_processes": ("medium-high", "Connection-count outliers and known C2 ports."),
     "privileged_user_anomaly": ("medium-high", "System accounts with shells; unknown process owners."),
+    "suspicious_module_loads": ("review", "Modules loaded from commonly user-writable Windows paths."),
+    "dll_sideloading": ("review", "DLLs loaded outside the owning process directory."),
+    "process_hollowing_indicators": ("high", "Private executable memory correlated with process evidence."),
+    "reflective_load_indicators": ("review", "Executable private memory retained as a reflective-loading lead."),
+    "thread_hijacking_indicators": ("review", "Thread-density leads requiring additional thread-level review."),
+    "injection_correlation": ("high", "Correlates module and executable-memory indicators on one process."),
 }
 
 

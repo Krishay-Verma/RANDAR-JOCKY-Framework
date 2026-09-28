@@ -136,22 +136,66 @@ def ensure_frontend(dev: bool, rebuild: bool) -> bool:
         if (FRONTEND / "dist" / "index.html").exists() and not dev:
             warn("Node.js not found - serving the existing UI build.")
             return True
-        warn("Node.js is not installed - starting the API only. Install Node 18+ from nodejs.org for the UI.")
+        warn("Node.js is not installed - starting the API only. Install Node 20.19+ or 22.12+ for the UI.")
         return False
-    if not (FRONTEND / "node_modules").exists():
-        note("Installing frontend dependencies (first run only) ...")
-        if not run([npm, "install", "--no-audit", "--no-fund"], FRONTEND):
-            warn("npm install failed - starting the API only.")
+
+    if not _node_supported():
+        if (FRONTEND / "dist" / "index.html").exists() and not dev:
+            warn("Node.js is too old for the current Vite toolchain - serving the existing UI build.")
+            return True
+        warn("Node.js 20.19+ or 22.12+ is required by the current Vite toolchain.")
+        return False
+
+    if not _frontend_tool_ready():
+        if (FRONTEND / "node_modules").exists():
+            note("Frontend dependencies look incomplete - repairing node_modules ...")
+            shutil.rmtree(FRONTEND / "node_modules", ignore_errors=True)
+        else:
+            note("Installing frontend dependencies (first run only) ...")
+        if not _install_frontend(npm):
+            warn("npm dependency installation failed - starting the API only.")
             return False
+        if not _frontend_tool_ready():
+            warn("Vite is still unavailable after dependency installation - starting the API only.")
+            return False
+
     if dev:
         return True
     if rebuild or frontend_stale():
         note("Building the frontend ...")
         if not run([npm, "run", "build"], FRONTEND):
-            warn("Frontend build failed - starting the API only.")
+            warn("Frontend build failed - starting the API only. Try 'cd frontend; npm ci; npm run build'.")
             return False
     ok("Frontend ready.")
     return True
+
+
+def _node_supported() -> bool:
+    """Vite 8 requires Node 20.19+ or 22.12+."""
+    node = shutil.which("node")
+    if node is None:
+        return False
+    try:
+        out = subprocess.check_output([node, "--version"], text=True, stderr=subprocess.DEVNULL).strip()
+        major, minor = (int(x) for x in out.lstrip("v").split(".")[:2])
+        return (major == 20 and minor >= 19) or major >= 22
+    except (OSError, ValueError):
+        return False
+
+
+def _frontend_tool_ready() -> bool:
+    """Verify that the actual Vite package and executable are present."""
+    package = FRONTEND / "node_modules" / "vite" / "package.json"
+    bin_dir = FRONTEND / "node_modules" / ".bin"
+    executable = bin_dir / ("vite.cmd" if os.name == "nt" else "vite")
+    return package.is_file() and executable.is_file()
+
+
+def _install_frontend(npm: str) -> bool:
+    """Install from the lockfile when available for deterministic setup."""
+    lockfile = FRONTEND / "package-lock.json"
+    command = "ci" if lockfile.exists() else "install"
+    return run([npm, command, "--no-audit", "--no-fund"], FRONTEND)
 
 
 # ── Run ───────────────────────────────────────────────────────────────────────

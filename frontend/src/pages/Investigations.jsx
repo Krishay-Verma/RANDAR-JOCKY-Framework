@@ -5,6 +5,18 @@ import { useLoad } from "../hooks";
 import { Confirm, Empty, Loading, Modal, Notice, Pill, SevChips } from "../components/ui";
 import { STATUS_LABEL, fmtTime } from "../lib";
 
+
+const INJECTION_RULES = new Set([
+  "suspicious_module_loads", "dll_sideloading", "process_hollowing_indicators",
+  "reflective_load_indicators", "thread_hijacking_indicators", "injection_correlation",
+]);
+function injectionState(record) {
+  const report = record?.report_json;
+  const findings = (report?.findings || []).filter((f) => INJECTION_RULES.has(f.rule_name));
+  const modules = report?.collector_results?.find((c) => c.target === "modules")?.data?.count || 0;
+  return { findings, modules };
+}
+
 export function EditCaseModal({ record, onClose, onSaved }) {
   const [name, setName] = useState(record.investigation_name);
   const [status, setStatus] = useState(record.status);
@@ -89,7 +101,7 @@ export default function Investigations() {
           rows.length === 0 ? <Empty title={data.length ? "No matches" : "No investigations yet"}>{data.length ? "Adjust the filters." : "Run an investigation to see it here."}</Empty> : (
             <div className="tbl-wrap">
               <table className="t">
-                <thead><tr><th>ID</th><th>Name</th><th>Endpoint</th><th>Started</th><th>C / H / M</th><th>Findings</th><th>Status</th><th /></tr></thead>
+                <thead><tr><th>ID</th><th>Name</th><th>Endpoint</th><th>Started</th><th>C / H / M</th><th>Findings</th><th>DLL / injection</th><th>Status</th><th /></tr></thead>
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.id}>
@@ -99,6 +111,7 @@ export default function Investigations() {
                       <td className="num">{fmtTime(r.started_at)}</td>
                       <td><SevChips counts={r.severity_counts} /></td>
                       <td className="num">{r.findings_count}</td>
+                      <td>{injectionState(r).findings.length ? <span className="badge sev-high">{injectionState(r).findings.length} indicators</span> : injectionState(r).modules ? <span className="badge sev-review_recommended">Telemetry</span> : <span style={{ color: "var(--dim)" }}>—</span>}</td>
                       <td><Pill value={r.status} /></td>
                       <td><div className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
                         <button className="btn sm" onClick={() => setEdit(r)}>Edit</button>
