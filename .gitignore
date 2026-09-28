@@ -1,0 +1,22 @@
+# environment / secrets
+.env
+*.key
+*.enc
+# python
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+# data
+*.db
+*.db-wal
+*.db-shm
+# generated reports
+triage_report.*
+jocky_report_*
+adaptive_triage_report*
+full_forensic_triage*
+# frontend
+node_modules/
+frontend/dist/
