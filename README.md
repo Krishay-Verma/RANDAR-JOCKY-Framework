@@ -1,418 +1,232 @@
 # JOCKY
 
-**Host forensic triage platform built around a purpose-made investigation language.**
-Smart India Hackathon 2026, problem statement SIH26148: *scripts and functions in a new programming language for computer and network forensic analysis.*
+**Forensics-as-Code platform for computer and network forensic triage**
 
-JOCKY lets an analyst describe an investigation in a small declarative language, executes it through a fixed allowlist of read-only collectors and deterministic analysis rules, stores the resulting evidence, and presents it in a web console. Investigations can run on the local host or be dispatched to remote endpoint agents. Reports can be exported as HTML or encrypted so that only the analyst's private key can open them.
+> **Smart India Hackathon 2026 · Problem Statement SIH26148**  
+> **Creation of scripts/functions with a new programming language to commence Computer & Network forensic analysis without triggering security solutions**
 
----
+**Team:** AVINYA  
+**Category:** Software  
+**Theme:** Cryptocurrency & Cybersecurity
 
-## Contents
+JOCKY is a modular digital-forensics and incident-triage platform built around a purpose-made investigation language. An analyst writes a compact JOCKY script describing what evidence to collect and what analysis to perform. The script is lexed, parsed, converted into an intermediate representation (IR), optionally compiled into signed bytecode, executed through a fixed allowlist of collectors and deterministic analysis rules, persisted as a case, and rendered through a forensic console or exported as a report.
 
-1. [Capabilities](#capabilities)
-2. [Quick start](#quick-start)
-3. [The JOCKY language](#the-jocky-language)
-4. [Collectors and analysis rules](#collectors-and-analysis-rules)
-5. [Web console](#web-console)
-6. [Endpoint agents](#endpoint-agents)
-7. [Signed bytecode](#signed-bytecode)
-8. [Encrypted reports](#encrypted-reports)
-9. [API reference](#api-reference)
-10. [Configuration](#configuration)
-11. [Security model](#security-model)
-12. [Architecture](#architecture)
-13. [Testing](#testing)
-14. [Limitations](#limitations)
-15. [Scope](#scope)
-16. [Change log](#change-log)
+The platform is designed around a **read-only, low-impact acquisition model**. It does not disable EDR/AV, tamper with security controls, perform DLL injection, write to another process's memory, or provide arbitrary command execution through the DSL. The SIH problem statement's objective is addressed through controlled forensic acquisition and analysis rather than security-control evasion.
 
 ---
 
-## Capabilities
+## Why JOCKY exists
 
-| Area | What it does |
-|---|---|
-| Language | Lexer, recursive-descent parser, IR and interpreter for the JOCKY DSL, including `let` variables and `if / else` branching on collected evidence. |
-| Collection | Nine read-only collectors: system info, processes, network connections, logged-in users, file hashes, scheduled tasks, startup items, open files, local users. Windows and Linux. |
-| Analysis | Seven deterministic rules producing findings on a five-level severity scale, each traceable to specific evidence. |
-| Case management | Store, search, rename, set status (open / in review / closed), annotate and delete investigations. Collected evidence is immutable; only case metadata is editable. |
-| Console | Dashboard, investigation list, script editor with live engine reference, evidence browser, agent management, bytecode workbench, key management. |
-| Remote agents | Poll-based agents with per-agent tokens. Dispatch a script, review the result, save it as a stored investigation. |
-| Bytecode | Compile scripts to HMAC-SHA256 signed bytecode, disassemble, and execute with signature verification. |
-| Reporting | Self-contained HTML report; AES-256-GCM report export with the key wrapped by RSA-OAEP. |
-| Operations | One-command installer and launcher (`start.py`), single-port deployment, automatic database migration. |
+Traditional forensic workflows often combine many independent tools, command-line utilities, scripts, query languages, and report formats. That creates three recurring problems:
 
----
+1. **Investigation logic becomes difficult to reproduce.**
+2. **Collection and analysis are tightly coupled to individual tools.**
+3. **A small change in an investigation can require new glue code or a new tool.**
 
-## Quick start
+JOCKY introduces a single investigation language and execution pipeline:
 
-Requirements: **Python 3.10+**. **Node.js 20.19+ or 22.12+** is needed to build the console (the API runs without it).
-
-```bash
-git clone <your repository URL>
-cd SIH26148-JOCKY
-
-python start.py          # Windows: .\start.ps1     Linux/macOS: ./start.sh
+```text
+Analyst Script
+     │
+     ▼
+ Lexer → Parser → IR
+     │
+     ├──────────────► Validate / Inspect IR
+     │
+     ▼
+ Interpreter / Signed Bytecode
+     │
+     ▼
+ Allowlisted Collectors
+     │
+     ▼
+ Evidence Store
+     │
+     ▼
+ Deterministic Analysis Rules
+     │
+     ▼
+ Findings + Provenance
+     │
+     ├──────────────► Web Console
+     └──────────────► HTML / Encrypted Report
 ```
 
-On the first run the launcher will:
+This makes the investigation itself a portable, reviewable artifact rather than a sequence of undocumented manual commands.
 
-1. create a virtual environment and install the Python dependencies,
-2. generate `.env` with an API token hash and a bytecode signing key,
-3. **print your API token once**: store it in a password manager,
-4. install and build the frontend,
-5. start the API and console on `http://127.0.0.1:8000` and open your browser.
+---
 
-Sign in with the token. Later runs skip everything that is already done.
+## What JOCKY can do today
+
+### Investigation language
+
+- Purpose-built JOCKY DSL for forensic investigations.
+- Lexer and recursive-descent parser.
+- Intermediate representation built from plain dataclasses.
+- `collect`, `analyze`, `report`, `let`, `if`, and `else` statements.
+- Bounded variables and conditional execution.
+- Allowlisted collectors, rules, and evidence properties.
+- Script validation without executing collection.
+- IR inspection from the console/API.
+
+### Endpoint evidence collection
+
+JOCKY currently exposes **12 collectors**:
+
+| Collector | Platform | Purpose |
+|---|---|---|
+| `system_info` | Windows/Linux | Host identity, OS, architecture, CPU, memory and current user. |
+| `processes` | Windows/Linux | Running processes, paths, owners and start times. |
+| `network_connections` | Windows/Linux | Local/remote sockets, ports, state and owning PID. |
+| `logged_in_users` | Windows/Linux | Interactive login/session information. |
+| `file_hash` | Windows/Linux | SHA-256 hashing of files in the operator-approved evidence directory. |
+| `scheduled_tasks` | Windows/Linux | Windows Task Scheduler or Linux cron-related persistence. |
+| `startup_items` | Windows/Linux | Windows Run/RunOnce/startup locations or Linux startup units. |
+| `open_files` | Windows/Linux | Bounded open-file/handle inventory per process. |
+| `local_users` | Windows/Linux | Local account inventory. `/etc/shadow` is never read. |
+| `modules` | **Windows** | Loaded DLL/EXE/SYS module inventory with bounded hashing of user-writable modules. |
+| `threads` | **Windows** | Read-only process/thread metadata and Windows thread start-address telemetry. |
+| `memory_regions` | **Windows** | Virtual-memory region metadata without reading or writing process memory. |
+
+### Deterministic analysis
+
+JOCKY currently exposes **13 analysis rules** covering:
+
+- Missing executable paths
+- Suspicious executable directories
+- Process/network correlation
+- Unusual scheduled tasks
+- Suspicious startup items
+- High connection processes
+- Privileged-user anomalies
+- Suspicious Windows module loads
+- DLL sideloading indicators
+- Process-hollowing indicators
+- Reflective-loading indicators
+- Thread-hijacking indicators
+- Multi-signal injection correlation
+
+Findings are deliberately phrased as **investigation indicators**, not malware verdicts. Each finding contains a rule name, severity, human-readable summary, reason, and related evidence.
+
+### Windows DLL / injection forensics
+
+The Windows-specific forensic layer provides read-only telemetry for investigating:
+
+- Unusual DLL/module locations
+- User-writable module loads
+- Potential DLL sideloading
+- Private executable memory regions
+- Potential process-hollowing patterns
+- Reflective-loading leads
+- Thread start addresses associated with private executable regions
+- Correlated module + executable-memory indicators
+
+**Important:** JOCKY detects and correlates evidence associated with these techniques; it does **not** inject DLLs, create remote threads for offensive purposes, suspend victim threads, or write another process's memory.
+
+### Case management and reporting
+
+- SQLite investigation persistence.
+- Immutable stored report/evidence JSON; case metadata remains editable separately.
+- Investigation status: `open`, `in_review`, `closed`.
+- Analyst notes.
+- Severity aggregation and dashboard statistics.
+- Self-contained HTML reports.
+- AES-256-GCM encrypted report export with RSA-OAEP key wrapping.
+- SHA-256 source-script fingerprinting.
+
+### Remote endpoint operations
+
+JOCKY includes a polling remote-agent architecture with:
+
+- Per-agent registration.
+- Per-agent bearer tokens stored as SHA-256 digests.
+- Job dispatch and atomic job claiming.
+- Script execution through the same JOCKY pipeline.
+- Result submission.
+- Heartbeats.
+- Agent revocation.
+- Exponential backoff for disconnected agents.
+- TLS certificate verification enabled by default.
+
+### Signed bytecode
+
+Scripts can be compiled to a compact JOCKY bytecode representation and protected with HMAC-SHA256 signing. Bytecode is verified before disassembly or execution and is reconstructed into the same IR/interpreter path used for source scripts.
+
+This means bytecode does **not** create a second, less-controlled execution path.
+
+---
+
+# Quick start
+
+## Requirements
+
+- Python **3.10+**
+- Node.js **20.19+** or **22.12+** for the current Vite build
+- Windows is the primary target for the advanced Windows forensic collectors.
+- Linux is supported by the cross-platform collectors; Windows-only collectors report an explicit unsupported status instead of silently failing.
+
+## One-command setup
+
+```bash
+python start.py
+```
+
+Windows PowerShell:
+
+```powershell
+.\start.ps1
+```
+
+Linux/macOS:
+
+```bash
+./start.sh
+```
+
+The launcher can:
+
+1. create the Python virtual environment;
+2. install Python dependencies;
+3. create the local `.env` configuration;
+4. generate a bytecode signing key when required;
+5. generate/display the API token on first setup;
+6. verify/install the frontend dependencies;
+7. build the React/Vite console;
+8. start Uvicorn;
+9. optionally open the browser.
+
+Default console/API:
+
+```text
+http://127.0.0.1:8000
+```
+
+Interactive API documentation:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+## Launcher commands
 
 | Command | Purpose |
 |---|---|
-| `python start.py` | Set up if needed and run. |
-| `python start.py --new-token` | Issue a new API token (the old one stops working). |
-| `python start.py --dev` | Vite dev server with hot reload at `:5173`, API with auto-reload. |
-| `python start.py --rebuild` | Force a frontend rebuild. |
-| `python start.py --host 127.0.0.1 --port 9000 --no-browser` | Custom bind address and port. |
+| `python start.py` | Set up missing dependencies and run JOCKY. |
+| `python start.py --new-token` | Generate a replacement API token. |
+| `python start.py --dev` | Run the API and Vite development workflow. |
+| `python start.py --rebuild` | Force a frontend production rebuild. |
+| `python start.py --no-browser` | Start without opening a browser window. |
+| `python start.py --host 127.0.0.1 --port 9000` | Use a custom bind address/port. |
 
-The console is rebuilt automatically when files under `frontend/src` change.
+### First-run authentication
 
-### Manual installation
-
-```bash
-python -m venv venv && source venv/bin/activate      # Windows: venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-cp .env.example .env                                  # then fill in the two secrets
-python -c "import secrets,hashlib;t=secrets.token_urlsafe(32);print(t);print(hashlib.sha256(t.encode()).hexdigest())"
-python -c "import secrets;print(secrets.token_urlsafe(48))"
-uvicorn jocky.api.main:app
-cd frontend && npm install && npm run build
-```
+The API is authenticated by a bearer token. The launcher prints the token when it is first generated. Store it securely. The browser keeps the token in `sessionStorage` and discards it when the tab/session ends.
 
 ---
 
-## The JOCKY language
+# JOCKY language at a glance
 
-A script describes one investigation. It is never executed as Python: it is tokenised, parsed to an IR of plain dataclasses, and interpreted against fixed registries.
-
-```text
-investigation "Adaptive Full Triage" {
-    let conn_threshold = 10;
-
-    collect system_info;
-    collect processes;
-    collect network_connections;
-    collect scheduled_tasks;
-
-    // Run the network rule only when the host is unusually chatty.
-    if network_connections.count > conn_threshold {
-        analyze high_connection_processes;
-    } else {
-        analyze process_network_correlation;
-    }
-
-    analyze suspicious_processes;
-    report "adaptive_triage";
-}
-```
-
-### Grammar
-
-```text
-investigation := 'investigation' STRING '{' statement* '}'
-statement     := 'collect' IDENT ';'
-               | 'analyze' IDENT ';'
-               | 'report'  STRING ';'
-               | 'let' IDENT '=' expr ';'
-               | 'if' expr op expr '{' statement* '}' ('else' '{' statement* '}')?
-op            := '>' | '<' | '>=' | '<=' | '==' | '!='
-expr          := INTEGER | STRING | 'true' | 'false' | IDENT | IDENT '.' IDENT
-```
-
-`//` starts a line comment. Integers only (at most 15 digits). Variable names match `[a-z_][a-z0-9_]*`.
-
-### Evidence properties usable in conditions
-
-`processes.count`, `network_connections.count`, `logged_in_users.count`, `file_hash.count`, `scheduled_tasks.count`, `startup_items.count`, `open_files.count`, `local_users.count`, `system_info.hostname`, `system_info.platform`, `system_info.cpu_count`.
-
-A property of a collector that has not run (or failed) evaluates to `0`, so a condition never crashes an investigation. The live list is served by `GET /api/catalog`.
-
-### Language limits
-
-| Limit | Value |
-|---|---|
-| Script size | 20,000 characters |
-| `if` nesting | 10 levels (enforced by the parser and the interpreter) |
-| Variables per investigation | 50 |
-| Integer literal length | 15 digits |
-
-Unknown collectors, rules or properties are hard errors. Malformed scripts fail before any collector runs.
-
----
-
-## Collectors and analysis rules
-
-### Collectors
-
-| Name | Evidence | Notes |
-|---|---|---|
-| `system_info` | Hostname, OS, version, architecture, CPU count, memory, current user | |
-| `processes` | PID, name, executable path, owner, start time | Per-field failures (access denied) yield `null`, not an error. |
-| `network_connections` | Protocol, local and remote address and port, state, PID | Needs elevation on some systems to see all sockets. |
-| `logged_in_users` | Interactive sessions | |
-| `file_hash` | SHA-256, size and mtime of files in the evidence directory | Non-recursive, at most 500 entries, 64 KiB streaming reads, symlinks refused. |
-| `scheduled_tasks` | Task Scheduler (Windows) or cron files and user crontab (Linux) | Capped at 500. |
-| `startup_items` | Run / RunOnce keys and Startup folders (Windows), systemd units and init.d (Linux) | Registry access is read-only. |
-| `open_files` | Open file handles per process | Capped at 50 per process, 2,000 total. |
-| `local_users` | `net user` (Windows) or `/etc/passwd` (Linux) | `/etc/shadow` is never read. |
-
-`file_hash` reads only `sample_evidence/` unless the operator sets `JOCKY_EVIDENCE_DIR`. The directory is chosen by the environment, never by a script.
-
-A collector that raises is recorded as an `error` result; the remaining collectors and their evidence are kept.
-
-### Severity scale
-
-`informational` < `review_recommended` < `medium` < `high` < `critical`
-
-Findings are observations for analyst review, not verdicts.
-
-### Rules
-
-| Rule | Severity | Detects |
-|---|---|---|
-| `missing_paths` | informational | Processes whose executable path cannot be read. |
-| `suspicious_processes` | review_recommended | Executables running from temp or download directories. |
-| `process_network_correlation` | informational | Processes holding remote connections. |
-| `unusual_scheduled_tasks` | high / critical | Tasks running from writable paths, double extensions (`.pdf.exe`), encoded PowerShell. |
-| `suspicious_startup_items` | medium / high / critical | Persistence outside system directories, double extensions, encoded PowerShell. |
-| `high_connection_processes` | medium / high | Processes with 15 or more connections; remote ports 4444, 4445, 5555, 1337, 31337, 6666, 8888, 9001, 9002. |
-| `privileged_user_anomaly` | medium / high | Linux system accounts with interactive shells; Windows processes owned by accounts not in the local user list. |
-
-A rule that throws is isolated: the investigation completes and records an informational finding naming the failed rule.
-
----
-
-## Web console
-
-Served by the API on the same origin after `npm run build` (no CORS configuration needed).
-
-| Page | Function |
-|---|---|
-| **Dashboard** | Totals, severity distribution, case status, most-triggered rules, investigated endpoints, recent investigations. |
-| **Investigations** | Search, filter by status, sort by recency or severity, edit case metadata, delete with confirmation. |
-| **New investigation** | Script editor with line gutter and error-line highlighting, four templates, click-to-insert engine reference generated from the live registries, **Validate** (parse only), **Show IR**, **Run**. |
-| **Investigation detail** | Findings filtered by severity with expandable reasoning and raw evidence; evidence browser with filtering and paging per collector; collector status; provenance (script SHA-256, timings, source); analyst notes; HTML and encrypted export; edit and delete. |
-| **Endpoint agents** | Register agents, dispatch scripts, watch job state, view results, save a result as an investigation, delete jobs, revoke agents. |
-| **Bytecode** | Compile and sign, verify and disassemble, verify and execute. |
-| **Report encryption** | Register or remove the RSA public key, view its fingerprint. |
-
-The bearer token is kept in `sessionStorage` (cleared when the tab closes), validated against the server on sign-in, and discarded on any `401`.
-
----
-
-## Endpoint agents
-
-Agents run on a target host, poll the API for jobs, execute them through the same pipeline and limits, and post results back.
-
-1. In **Endpoint agents**, choose *Register agent*. The console shows the agent ID and a one-time token together with the exact launch command.
-2. Run it on the endpoint (the agent needs this repository and its dependencies):
-
-   ```bash
-   python -m jocky.agent --api-url https://jocky.example.org --agent-id <id> --agent-token <token>
-   ```
-
-   Environment variables `JOCKY_API_URL`, `JOCKY_AGENT_ID`, `JOCKY_AGENT_TOKEN`, `JOCKY_POLL_INTERVAL` and `JOCKY_TLS_VERIFY` are also honoured.
-3. Dispatch a script. It is lexed and parsed before queuing, claimed atomically by the agent, and marked `complete` or `failed`.
-4. Review the result and use *Save as investigation* to persist it.
-
-Agent tokens are stored as SHA-256 digests and compared in constant time. An agent token can reach only its own job endpoints. The agent backs off exponentially when the API is unreachable.
-
-> The agent and job registry live in server memory (100 agents, 1,000 jobs; the oldest finished jobs are evicted at the cap). Restarting the API clears them. Save results you need to keep.
-
----
-
-## Signed bytecode
-
-`POST /api/bytecode/compile` flattens a script into a linear opcode list (`COLLECT`, `ANALYZE`, `REPORT`, `LET`, `IF`) wrapped in a header and signed with HMAC-SHA256 using `JOCKY_BYTECODE_KEY`.
-
-Wire format (big-endian): `[4B header length][header JSON][4B body length][body JSON][32B signature]`.
-
-Before disassembly or execution the signature is verified in constant time, then the magic value and version are checked. Executed bytecode is rebuilt into the IR and run through the ordinary interpreter, so it cannot reach anything a source script could not. All failure modes return one generic `BytecodeError`.
-
----
-
-## Encrypted reports
-
-Hybrid encryption: a fresh AES-256 key and 96-bit nonce per report; body encrypted with AES-GCM; the AES key wrapped with the analyst's RSA public key (OAEP, SHA-256). The server never holds the private key and cannot read an exported report.
-
-```bash
-python -m jocky.api.key_gen                         # writes jocky_investigator.key / .pub
-# register the .pub contents in the console (Report encryption), then export from an investigation
-python -m jocky.api.decrypt_report --key jocky_investigator.key \
-       --input jocky_report_1.enc --output report.json
-```
-
-Keys of fewer than 2048 bits are refused. The registered public key is held in memory only and cleared on restart. Keep the `.key` file private.
-
----
-
-## API reference
-
-Interactive documentation is served at `/docs` (disable with `JOCKY_DOCS=false`). Every route except `/api/health` requires `Authorization: Bearer <token>`; agent routes use the per-agent token.
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/health` | Liveness (public). |
-| GET | `/api/catalog` | Collectors, rules, evidence properties, severities. |
-| GET | `/api/stats` | Dashboard aggregates. |
-| POST | `/api/investigations` | Validate, run, store. |
-| GET | `/api/investigations` | Summaries, newest first. |
-| GET | `/api/investigations/{id}` | Full record with report. |
-| PATCH | `/api/investigations/{id}` | Edit name, status, notes. |
-| DELETE | `/api/investigations/{id}` | Delete. |
-| GET | `/api/investigations/{id}/report.html` | HTML report download. |
-| GET | `/api/investigations/{id}/report.encrypted` | Encrypted report (requires a registered key). |
-| POST | `/api/validate` | Parse only; nothing runs. |
-| POST | `/api/compile` | Return the IR. |
-| POST / GET / DELETE | `/api/keys/register`, `/api/keys/status` | Manage the public key. |
-| POST | `/api/bytecode/compile`, `/disasm`, `/execute` | Bytecode workbench. |
-| POST / GET | `/api/agents/register`, `/api/agents` | Register and list agents. |
-| DELETE | `/api/agents/{agent_id}` | Revoke an agent. |
-| POST / GET | `/api/agents/{agent_id}/jobs` | Dispatch and list jobs. |
-| GET / DELETE | `/api/agents/{agent_id}/jobs/{job_id}[/result]` | Read or delete a job. |
-| POST | `/api/agents/{agent_id}/jobs/{job_id}/import` | Save a completed job as an investigation. |
-| GET / POST | `/api/agents/{agent_id}/jobs/pending`, `.../result`, `.../error`, `/heartbeat` | Agent-side endpoints (agent token). |
-
-Editable case fields: `investigation_name` (1 to 200 characters), `status` (`open`, `in_review`, `closed`), `notes` (up to 10,000 characters).
-
----
-
-## Configuration
-
-`start.py` writes `.env` for you. All variables:
-
-| Variable | Required | Meaning |
-|---|---|---|
-| `JOCKY_API_TOKEN_HASH` | yes | SHA-256 of the bearer token. The API refuses to start without it. |
-| `JOCKY_BYTECODE_KEY` | for bytecode | HMAC key, at least 32 characters. Without it bytecode routes return `503`. |
-| `JOCKY_CORS_ORIGINS` | no | Extra allowed origins. Unnecessary when the API serves the console. |
-| `JOCKY_EVIDENCE_DIR` | no | Directory hashed by `file_hash`. Default `sample_evidence/`. |
-| `JOCKY_DB_PATH` | no | SQLite file. Default `jocky.db` in the project root. |
-| `JOCKY_DOCS` | no | `false` disables `/docs`. |
-
----
-
-## Security model
-
-- **Allowlisted execution.** Scripts select from fixed registries; there is no path from script text to arbitrary code, file, or command.
-- **Authentication.** Single-operator bearer token; only its SHA-256 digest is stored; constant-time comparison; startup aborts if unset. Protected routes share a router-level dependency, so a new route cannot be left unauthenticated by omission.
-- **Agent isolation.** Per-agent tokens, digest-only storage, constant-time checks with equalised timing for unknown IDs, atomic job claiming, and atomic `running` to `complete/failed` transitions so a job cannot be completed twice or failed after completion.
-- **Input bounds.** Script (20,000 chars), bytecode, PEM, notes and name lengths are validated; request bodies over 20 MB are rejected; lexer, parser and interpreter limits are enforced.
-- **Evidence integrity.** Reports are stored as immutable JSON. Each investigation records the SHA-256 of its script. Case edits touch metadata columns only.
-- **File access.** `file_hash` is confined to one resolved directory, refuses symlinks, and is bounded in count and memory.
-- **Transport and browser.** Security headers (`nosniff`, `X-Frame-Options: DENY`, `no-referrer`), `Cache-Control: no-store` on API responses, a locked-down CSP on downloaded HTML reports, all report content HTML-escaped, no secrets in the frontend bundle.
-- **SQL.** Parameterised queries only; connections closed in `finally`.
-
-Run behind a TLS-terminating reverse proxy for anything beyond localhost. The bundled launcher binds to `127.0.0.1` by default and warns if you change that.
-
----
-
-## Architecture
-
-```text
- React console  ──HTTP──▶  FastAPI  ──▶  lexer ─▶ parser ─▶ IR ─▶ interpreter
- (served from /)            │                                       │      │
-                            │                             collector │      │ rule
-                            │                             registry  ▼      ▼ registry
-                            │                                  evidence ─▶ findings
-                            ▼                                        │
-   SQLite (jocky.db)  ◀── report builder ◀──────────────────────────┘
-                            ▲
-   Endpoint agents ──poll───┘   (job queue in memory; results importable to SQLite)
-```
-
-```text
-jocky/
-  language/    lexer, parser, ir, interpreter, bytecode
-  collectors/  nine collectors + registry
-  analysis/    finding model, rules, extended rules, registry
-  reports/     builder, HTML writer, JSON writer, encryptor
-  storage/     SQLite layer (migrations, CRUD, stats)
-  api/         routes, auth, agent routes/store, bytecode routes, keys, catalog
-  agent/       remote agent
-frontend/      React 19 + Vite console
-tests/         regression tests
-start.py       installer and launcher
-```
-
-Design decisions that still apply: explicit registries over dynamic dispatch, a hand-written parser (the grammar is small), a data-only IR, SQLite with one JSON document per report, sequential collection for deterministic ordering, and findings phrased as observations.
-
----
-
-## Testing
-
-```bash
-pip install pytest
-python -m pytest tests -q          # regression suite
-python test_lexer.py               # lexer sanity
-python test_interpreter.py         # full local triage; writes JSON and HTML reports
-python test_bytecode.py            # bytecode round trip
-cd frontend && npm run lint && npm run build
-```
-
----
-
-## Limitations
-
-- Collection and analysis are sequential and synchronous; long investigations hold a worker thread. There is no cancellation.
-- The agent registry, job queue and registered public key are in memory.
-- Scripts are delivered to agents over the agent's authenticated channel and are not signed; use TLS. (Signed bytecode is available but agents currently receive source.)
-- Single operator: one bearer token, one active public key.
-- `file_hash` is non-recursive and capped at 500 entries.
-- SQLite is suited to local and small-team use. Reports are opaque JSON documents and are not individually indexed.
-- The DSL has no loops, functions, or arithmetic.
-- The `/tmp`-style path heuristics in the rules produce false positives on legitimate software; findings need analyst judgement.
-
----
-
-## Scope
-
-The original problem statement mentions evasion techniques such as process hollowing, reflective DLL injection, BYOVD and kernel-level security bypass. **These are intentionally not implemented.** JOCKY is an auditable, read-only triage framework.
-
----
-
-## Change log
-
-**1.0.0**
-
-*Frontend*: rebuilt as a dark operations console (dashboard, case management, editor with engine reference, evidence browser, agents, bytecode, key management); same-origin deployment.
-
-*Features added*: edit and delete investigations (status, notes, rename); agent revoke, job delete and save-to-investigation; `/api/catalog`, `/api/stats`, `/api/keys/status`; configurable evidence directory; one-command installer with token issuance.
-
-*Bugs fixed*:
-- `logged_in_users.count` always evaluated to 0 (the collector returns `sessions`).
-- The suspicious-port rule never fired: it read `remote_port`, which the collector did not emit.
-- Unicode digits (for example `²`) and very long integers crashed the lexer with an unhandled exception (HTTP 500).
-- Unbounded `if` nesting could exhaust the parser stack; now capped at 10.
-- A failing analysis rule aborted the whole investigation; it is now isolated.
-- Extended rules emitted severities that the model did not define; one five-level scale is now shared everywhere.
-- Quoted trusted startup paths (`"C:\Program Files\..."`) were flagged as untrusted.
-- Non-numeric ports could crash `high_connection_processes`.
-- Agent jobs could be completed twice, or failed after completion (check-then-act race); transitions are now atomic.
-- The 1,000-job cap was never released, permanently blocking dispatch; finished jobs are now evicted.
-- `file_hash` symlink entries bypassed the 500-file cap.
-- The database path depended on the working directory; it is now anchored to the project root.
-- `report.html` lost the script hash and only styled two of five severities.
-- Missing bytecode key produced a bare 500; it now returns 503 with a clear message.
-- Removed a truncated deprecated encryption shim and unused imports; replaced deprecated FastAPI startup hook.
-- Removed committed generated reports from the repository and completed `.gitignore`.
-
-## Windows Injection Forensics
-
-JOCKY includes a Windows-only, read-only forensic collection and correlation pack for
-investigating injection-like activity. It covers loaded modules, process threads and
-virtual-memory region metadata and exposes the capabilities through the existing JOCKY
-DSL registry.
-
-Example:
+A complete investigation can be written as a small, readable script:
 
 ```text
 investigation "Windows Injection Forensics" {
@@ -434,32 +248,226 @@ investigation "Windows Injection Forensics" {
 }
 ```
 
-### Safety boundary
+Conditional investigations are also supported:
 
-The Windows injection pack is an evidence and detection subsystem. Collectors query
-read-only process/module/thread/memory metadata. They do not write process memory,
-create remote threads, suspend threads, inject DLLs, disable security controls, or
-provide arbitrary Windows API access through the DSL. Findings describe indicators
-for analyst review rather than claiming that an injection technique is proven from
-one artifact.
+```text
+investigation "Adaptive Triage" {
+    let connection_limit = 10;
 
-### Windows evidence modules
+    collect system_info;
+    collect processes;
+    collect network_connections;
 
-- `modules` — bounded process/module inventory with SHA-256 hashing for modules in
-  commonly user-writable paths.
-- `threads` — thread inventory and read-only Windows thread start-address metadata
-  where the endpoint permits access.
-- `memory_regions` — bounded `VirtualQueryEx` metadata collection; JOCKY never reads
-  the contents of another process's memory.
+    if network_connections.count > connection_limit {
+        analyze high_connection_processes;
+    } else {
+        analyze process_network_correlation;
+    }
 
-### Analysis rules
+    report "adaptive_triage";
+}
+```
 
-- `suspicious_module_loads`
-- `dll_sideloading`
-- `process_hollowing_indicators`
-- `reflective_load_indicators`
-- `thread_hijacking_indicators`
-- `injection_correlation`
+The full language reference is in [`docs/DSL_REFERENCE.md`](docs/DSL_REFERENCE.md).
 
-The UI exposes these capabilities under **Injection analysis** and the New Investigation
-editor includes a **Windows injection hunt** template.
+---
+
+# Architecture
+
+```text
+┌───────────────────────────────────────────────────────────────┐
+│                         JOCKY Console                         │
+│ React + Vite · Investigations · Evidence · Agents · Reports  │
+└───────────────────────────────┬───────────────────────────────┘
+                                │ HTTP / JSON
+                                ▼
+┌───────────────────────────────────────────────────────────────┐
+│                         FastAPI API                           │
+│ Authentication · Validation · Case APIs · Bytecode · Reports │
+└───────────────────────────────┬───────────────────────────────┘
+                                │
+                                ▼
+┌───────────────────────────────────────────────────────────────┐
+│                    JOCKY Language Engine                     │
+│ Lexer → Parser → IR → Interpreter                            │
+│                ↘ Bytecode compiler / verifier                │
+└───────────────┬──────────────────────┬────────────────────────┘
+                │                      │
+                ▼                      ▼
+       ┌────────────────┐      ┌────────────────────┐
+       │   Collectors   │      │  Analysis Rules    │
+       │ Read-only      │      │ Pure evidence-in → │
+       │ endpoint data  │      │ finding-out        │
+       └───────┬────────┘      └─────────┬──────────┘
+               │                         │
+               └──────────┬──────────────┘
+                          ▼
+                 ┌─────────────────┐
+                 │ Evidence / Case │
+                 │ SQLite + JSON   │
+                 └────────┬────────┘
+                          ▼
+              ┌──────────────────────┐
+              │ HTML / Encrypted     │
+              │ forensic reporting   │
+              └──────────────────────┘
+```
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a component-by-component explanation.
+
+---
+
+# Security philosophy
+
+JOCKY is deliberately constrained.
+
+### The DSL is not a shell
+
+A JOCKY script can invoke only collectors and analysis rules explicitly registered by the engine. Unknown names fail validation. Scripts cannot call arbitrary Python, Windows APIs, PowerShell, `cmd.exe`, or system utilities.
+
+### Collection and analysis are separated
+
+Collectors gather evidence. Rules consume evidence and produce findings. This makes the analytical layer easier to test, reason about, and extend without giving rules direct endpoint access.
+
+### Windows injection analysis is read-only
+
+The Windows injection collectors inspect module metadata, thread metadata, and virtual-memory metadata. They do not read arbitrary process memory and do not modify target processes.
+
+### Reports can be protected for transfer
+
+The report body is encrypted using AES-256-GCM. The AES key is wrapped using the investigator's RSA public key. The server never needs the investigator's private key.
+
+### Security controls are not disabled
+
+JOCKY is not an EDR-bypass framework. It does not disable AV/EDR, tamper with security products, remove telemetry, or attempt to conceal collection. The low-impact design exists to reduce endpoint modification during legitimate forensic acquisition.
+
+See [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md).
+
+---
+
+# Repository layout
+
+```text
+JOCKY/
+├── jocky/
+│   ├── agent/          # Remote endpoint agent
+│   ├── analysis/       # Evidence-driven analysis rules
+│   ├── api/            # FastAPI routes, auth, catalog, key handling
+│   ├── collectors/     # Read-only endpoint collectors
+│   ├── language/       # Lexer, parser, IR, interpreter, bytecode
+│   ├── reports/        # Report model, builders, HTML and encryption
+│   └── storage/        # SQLite case persistence
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   ├── pages/
+│   │   └── api/
+│   └── public/         # JOCKY icon/favicon assets
+├── docs/               # Full product and engineering documentation
+├── tests/              # Regression and security-boundary tests
+├── sample_evidence/    # Small controlled evidence fixture
+├── start.py            # Cross-platform launcher
+├── start.ps1           # Windows launcher wrapper
+├── start.sh            # Unix launcher wrapper
+├── requirements.txt
+└── README.md
+```
+
+---
+
+# Documentation
+
+| Document | Audience | Purpose |
+|---|---|---|
+| [`docs/PRODUCT_GUIDE.md`](docs/PRODUCT_GUIDE.md) | Investigators, students, judges | What JOCKY does, why it exists, and how the pieces work together. |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Developers, architects | Deep component and data-flow explanation. |
+| [`docs/DSL_REFERENCE.md`](docs/DSL_REFERENCE.md) | Investigators, developers | JOCKY language syntax, semantics, limits and examples. |
+| [`docs/DFIR_CAPABILITIES.md`](docs/DFIR_CAPABILITIES.md) | DFIR analysts | Detailed collector/rule capabilities and interpretation. |
+| [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) | Security reviewers | Trust boundaries, authentication, signing, encryption and safety limits. |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Operators | Windows/Linux setup, configuration, agents and operational guidance. |
+| [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md) | Contributors | File-by-file development map and extension points. |
+| [`docs/DEMO_PLAYBOOK.md`](docs/DEMO_PLAYBOOK.md) | SIH presenters | A repeatable end-to-end demonstration workflow. |
+
+---
+
+# API
+
+The FastAPI application exposes interactive documentation at `/docs`.
+
+Core authenticated operations include:
+
+- health/liveness
+- investigation execution and persistence
+- script validation
+- IR compilation/inspection
+- investigation listing and retrieval
+- case metadata updates
+- HTML report export
+- encrypted report export
+- collector/rule catalog discovery
+- dashboard statistics
+- investigator public-key registration
+- signed bytecode compilation/verification/execution
+- remote-agent registration and job operations
+
+The authoritative route definitions are under `jocky/api/` and the live capability catalog is served by `GET /api/catalog`.
+
+---
+
+# Testing
+
+Run the regression suite:
+
+```bash
+pytest -q
+```
+
+The current project baseline contains regression coverage for:
+
+- DSL parsing/interpreter behavior
+- bytecode integrity
+- collector/rule registration
+- Windows-only injection collector safety on non-Windows systems
+- injection rule registration and correlation
+- authentication/security boundaries
+
+A passing suite is necessary but not sufficient for production forensic validation; endpoint-specific testing should still be performed on controlled Windows systems.
+
+---
+
+# Current limitations
+
+JOCKY is a forensic triage platform, not a complete enterprise EDR or malware-analysis suite.
+
+Current boundaries include:
+
+- Windows injection telemetry is metadata-oriented; JOCKY does not read arbitrary process memory.
+- PE static analysis, ETW/Sysmon ingestion, full Windows event-log analytics, and dedicated PowerShell event collection are not yet first-class collectors.
+- Remote agent state is held in server memory and is cleared when the API restarts; saved investigations remain in SQLite.
+- The current DSL intentionally has a small grammar. It is designed for safe orchestration, not general-purpose programming.
+- Some endpoint data requires elevated privileges to observe completely.
+- Findings are indicators for human review, not definitive malware determinations.
+
+These boundaries are documented deliberately so users can distinguish implemented functionality from planned extensions.
+
+---
+
+# Responsible use
+
+JOCKY is intended for authorized digital-forensics, incident-response, defensive security research, education, and controlled laboratory environments.
+
+Only investigate systems and data for which you have appropriate authorization. Do not use the platform to evade security controls, obtain unauthorized access, or interfere with other users or systems.
+
+---
+
+# Project status
+
+JOCKY is an actively developed SIH 2026 prototype with a working end-to-end investigation pipeline, Windows-specific advanced telemetry, remote-agent architecture, signed bytecode, case persistence, and protected reporting.
+
+The next engineering priorities are deeper Windows telemetry, stronger evidence correlation, expansion of the JOCKY language, production hardening, endpoint packaging, and broader automated testing.
+
+---
+
+## License
+
+No open-source license is declared in this repository at present. Unless and until a license file is added, treat the project as **all rights reserved** and obtain permission before redistributing or incorporating the source into another product.
