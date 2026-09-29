@@ -18,6 +18,11 @@ from jocky.collectors.modules import collect_modules
 from jocky.collectors.threads import collect_threads
 from jocky.collectors.logged_in_users import collect_logged_in_users
 from jocky.collectors.network_connections import collect_network_connections
+from jocky.collectors.network_artifacts import collect_network_artifacts
+from jocky.collectors.windows_event_logs import collect_windows_event_logs
+from jocky.collectors.sysmon_events import collect_sysmon_events
+from jocky.collectors.services import collect_services
+from jocky.collectors.pe_metadata import collect_pe_metadata
 from jocky.collectors.open_files import collect_open_files
 from jocky.collectors.processes import collect_processes
 from jocky.collectors.scheduled_tasks import collect_scheduled_tasks
@@ -38,6 +43,11 @@ _COLLECTORS: dict[str, object] = {
     "system_info":         collect_system_info,
     "processes":           collect_processes,
     "network_connections": collect_network_connections,
+    "network_artifacts": collect_network_artifacts,
+    "windows_event_logs":  collect_windows_event_logs,
+    "sysmon_events":        collect_sysmon_events,
+    "services":             collect_services,
+    "pe_metadata":          collect_pe_metadata,
     "logged_in_users":     collect_logged_in_users,
     "file_hash":           partial(collect_file_hashes, str(_EVIDENCE_DIR)),
     "scheduled_tasks":     collect_scheduled_tasks,

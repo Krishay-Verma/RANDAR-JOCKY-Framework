@@ -1,0 +1,18 @@
+{
+  "product": "RANDAR",
+  "release": "1.9.2",
+  "language": "JOCKY",
+  "sih": {
+    "event": "Smart India Hackathon 2026",
+    "problem_statement": "SIH26148"
+  },
+  "verified_registries": {
+    "collectors": 17,
+    "analysis_rules": 40
+  },
+  "regression_tests": {
+    "passed": 91,
+    "failed": 0
+  },
+  "documentation_scope": "Current implementation baseline; historical release notes retained separately."
+}

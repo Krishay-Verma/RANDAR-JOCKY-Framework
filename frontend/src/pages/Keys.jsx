@@ -4,7 +4,7 @@ import { useLoad } from "../hooks";
 import { Loading, Notice, Pill } from "../components/ui";
 
 export default function Keys() {
-  const { data, error, loading, reload } = useLoad(() => api.keyStatus(), []);
+  const { data, error, loading, reload } = useLoad((signal) => api.keyStatus(signal), []);
   const [pem, setPem] = useState("");
   const [msg, setMsg] = useState({ kind: "ok", text: "" });
   const [busy, setBusy] = useState(false);

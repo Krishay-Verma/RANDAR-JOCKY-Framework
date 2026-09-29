@@ -1,0 +1,20 @@
+investigation "Windows Telemetry Hunt" {
+    collect system_info;
+    collect processes;
+    collect network_connections;
+    collect windows_event_logs;
+    collect sysmon_events;
+    collect services;
+    collect startup_items;
+    collect scheduled_tasks;
+
+    analyze encoded_powershell;
+    analyze suspicious_powershell_parent;
+    analyze powershell_network_activity;
+    analyze powershell_child_processes;
+    analyze suspicious_services;
+    analyze writable_service_paths;
+    analyze persistence_correlation;
+
+    report "windows_telemetry_hunt";
+}

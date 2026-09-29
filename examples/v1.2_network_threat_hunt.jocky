@@ -1,0 +1,26 @@
+investigation "Network Threat Hunt" {
+    collect network_artifacts;
+    collect processes;
+    collect network_connections;
+
+    analyze suspicious_dns_queries;
+    analyze dns_entropy;
+    analyze rare_domains;
+    analyze suspicious_tld_patterns;
+    analyze dns_bursts;
+    analyze unusual_query_types;
+    analyze long_random_labels;
+    analyze dns_tunneling_indicators;
+    analyze dns_beaconing;
+
+    analyze network_beaconing;
+    analyze port_scan;
+    analyze horizontal_scan;
+    analyze service_discovery;
+    analyze udp_scan;
+    analyze network_classification;
+
+    analyze process_network_correlation;
+
+    report "network_threat_hunt";
+}

@@ -1,134 +1,223 @@
-# JOCKY DFIR Capabilities Reference
+# RANDAR DFIR Capabilities Reference
+
+**Implementation baseline:** v1.9.2
+
+This document describes the capabilities currently registered in the source code.
 
 ## 1. Collector matrix
 
-| Capability | Windows | Linux | Primary use |
-|---|:---:|:---:|---|
-| System information | ✓ | ✓ | Establish host context. |
-| Processes | ✓ | ✓ | Identify running programs, owners and paths. |
-| Network connections | ✓ | ✓ | Establish process/network relationships. |
-| Logged-in users | ✓ | ✓ | Identify active sessions. |
-| File hashing | ✓ | ✓ | Produce stable file identifiers in an approved evidence directory. |
-| Scheduled tasks / cron | ✓ | ✓ | Identify persistence mechanisms. |
-| Startup items | ✓ | ✓ | Identify startup/persistence entries. |
-| Open files | ✓ | ✓ | Link processes to opened files/handles. |
-| Local users | ✓ | ✓ | Establish account context. |
-| Loaded modules | ✓ | — | Windows DLL/EXE/SYS inventory. |
-| Threads | ✓ | — | Windows thread metadata. |
-| Memory regions | ✓ | — | Windows virtual-memory metadata. |
+### Cross-platform collectors
 
-A Windows-only collector returns an explicit unsupported result on other operating systems.
+| Collector | Evidence surface | Key boundaries |
+|---|---|---|
+| `system_info` | Host identity, OS, architecture, CPU, memory, current user | Host metadata only |
+| `processes` | Running processes, paths, owners, start time | Access restrictions can hide fields |
+| `network_connections` | Active network sockets | Point-in-time state |
+| `network_artifacts` | Normalized DNS/connection evidence | Uses supported evidence sources; no payload retention |
+| `logged_in_users` | Interactive sessions | Point-in-time state |
+| `file_hash` | SHA-256 for operator-approved evidence directory | Directory is fixed by operator configuration |
+| `scheduled_tasks` | Task Scheduler / cron | Platform-specific surfaces |
+| `startup_items` | Startup/Run/system startup surfaces | Platform-specific surfaces |
+| `open_files` | Bounded open-file/handle inventory | Access-dependent and bounded |
+| `local_users` | Local accounts | Does not read `/etc/shadow` |
+
+### Windows collectors
+
+| Collector | Evidence surface | Key boundaries |
+|---|---|---|
+| `modules` | Loaded file-backed modules | Bounded inventory; selective hashing |
+| `threads` | Process/thread metadata | No thread modification |
+| `memory_regions` | Virtual-memory metadata | No memory contents read |
+| `windows_event_logs` | Bounded Windows event metadata | Fixed event/channel scope |
+| `sysmon_events` | Selected Sysmon event IDs | Bounded event collection |
+| `services` | Service state/configuration metadata | Metadata only |
+| `pe_metadata` | PE structure, imports, exports, entropy, hash, signature metadata | Bounded file count/size |
+
+**Total: 17 registered collectors.**
 
 ---
 
 ## 2. Analysis matrix
 
-| Rule | Main evidence | Purpose |
-|---|---|---|
-| `missing_paths` | processes | Highlight processes whose executable path is unavailable. |
-| `suspicious_processes` | processes | Flag executables from temporary/download-style locations. |
-| `process_network_correlation` | processes + network | Connect network activity to processes. |
-| `unusual_scheduled_tasks` | scheduled tasks | Identify persistence entries requiring review. |
-| `suspicious_startup_items` | startup items | Identify unusual startup/persistence paths. |
-| `high_connection_processes` | network + processes | Identify connection-count outliers and selected remote ports. |
-| `privileged_user_anomaly` | users + processes | Identify account/ownership patterns requiring review. |
-| `suspicious_module_loads` | modules | Identify modules loaded from user-writable paths. |
-| `dll_sideloading` | modules + processes | Identify modules outside expected process directories. |
-| `process_hollowing_indicators` | memory regions + processes | Identify private executable-memory patterns. |
-| `reflective_load_indicators` | memory regions | Surface executable private memory as a review lead. |
-| `thread_hijacking_indicators` | threads + memory regions | Correlate thread starts with private executable memory. |
-| `injection_correlation` | modules + memory regions + processes | Combine independent injection-related indicators. |
+### Endpoint/process
+
+| Rule | Interpretation |
+|---|---|
+| `missing_paths` | Executable path could not be determined |
+| `suspicious_processes` | Process executable is in a commonly user-writable/unusual location |
+| `process_network_correlation` | Links process evidence with network connections |
+| `high_connection_processes` | Connection-count outlier / configured network behavior lead |
+| `privileged_user_anomaly` | Cross-correlates account privilege and process ownership |
+
+### Persistence / Windows telemetry
+
+| Rule | Interpretation |
+|---|---|
+| `unusual_scheduled_tasks` | Task persistence patterns requiring review |
+| `suspicious_startup_items` | Startup entries outside expected locations |
+| `encoded_powershell` | Encoded/hidden/non-interactive PowerShell indicators |
+| `suspicious_powershell_parent` | PowerShell launched by a context requiring review |
+| `powershell_network_activity` | PowerShell associated with active network activity |
+| `powershell_child_processes` | PowerShell child-process relationships |
+| `suspicious_services` | Service executable/path characteristics requiring review |
+| `writable_service_paths` | Writable service executable or parent directory |
+| `persistence_correlation` | Common executable observed across persistence surfaces |
+
+### Network threat hunting
+
+| Rule | Interpretation |
+|---|---|
+| `suspicious_dns_queries` | Configured DNS review patterns |
+| `dns_entropy` | High-entropy labels |
+| `rare_domains` | Low-prevalence domains in the supplied evidence |
+| `suspicious_tld_patterns` | Configured review TLD patterns |
+| `dns_bursts` | Repeated/high-volume DNS activity |
+| `unusual_query_types` | Uncommon DNS query types |
+| `long_random_labels` | Long/random-looking labels |
+| `dns_tunneling_indicators` | Combined tunnelling characteristics |
+| `dns_beaconing` | Repeated DNS intervals with low jitter |
+| `network_beaconing` | Repeated network connection intervals |
+| `port_scan` | One source contacting many ports |
+| `horizontal_scan` | One source contacting one service across hosts |
+| `service_discovery` | Systematic contact with common infrastructure ports |
+| `udp_scan` | Repeated UDP probe pattern |
+| `network_classification` | Descriptive address classification |
+
+### Windows module/injection forensics
+
+| Rule | Interpretation |
+|---|---|
+| `suspicious_module_loads` | Modules loaded from commonly writable paths |
+| `dll_sideloading` | DLL location inconsistent with owning executable directory |
+| `process_hollowing_indicators` | Private executable memory correlated with process evidence |
+| `reflective_load_indicators` | Executable private memory without a corresponding module path |
+| `thread_hijacking_indicators` | Thread start address associated with private executable memory |
+| `injection_correlation` | Combines independent injection indicators |
+
+### PE/module analysis
+
+| Rule | Interpretation |
+|---|---|
+| `unsigned_loaded_module` | Loaded PE lacks embedded signature metadata |
+| `suspicious_imports` | Imports APIs associated with process/memory manipulation |
+| `high_entropy_module` | PE/section entropy requires file-level review |
+| `module_disk_mismatch` | Loaded module and disk evidence disagree or cannot be correlated |
+| `suspicious_writable_module` | Writable path or executable+writable PE characteristic |
+
+**Total: 40 registered analysis rules.**
 
 ---
 
-## 3. Interpreting severity
+## 3. Severity semantics
 
-JOCKY uses:
+RANDAR severity is a triage priority, not a probability of compromise.
 
-```text
-informational
-review_recommended
-medium
-high
-critical
-```
+| Severity | Meaning |
+|---|---|
+| `informational` | Contextual evidence |
+| `review_recommended` | Evidence worth analyst review |
+| `medium` | Higher-priority review lead |
+| `high` | Significant correlation or anomaly requiring prompt validation |
+| `critical` | Reserved for rules whose implementation explicitly assigns this level |
 
-Severity describes the priority of human review, not certainty of maliciousness.
-
-A `high` finding means the evidence pattern is important enough to investigate. It does not mean JOCKY has proven malware or compromise.
+A finding can be high-severity without proving maliciousness.
 
 ---
 
-## 4. Windows DLL/injection interpretation
+## 4. Windows injection interpretation
 
 ### Suspicious module load
 
-A loaded module is associated with a path commonly writable by a non-administrator user.
+A module path falls into a commonly writable category.
 
-**Why it matters:** writable module locations can be abused for module replacement or unexpected loading.
-
-**Why it is not proof:** legitimate applications can load plugins or user-controlled modules from such locations.
+**Interpretation:** review path, signer, hash and process context.
 
 ### DLL sideloading
 
-A DLL is observed outside the process executable directory and outside standard system paths.
+A DLL is loaded outside the owning executable's directory.
 
-**Why it matters:** unexpected search-path behavior can be relevant to sideloading investigations.
+**Interpretation:** this is a correlation lead, not proof of sideloading.
 
-### Process hollowing indicator
+### Process-hollowing indicator
 
-A process has multiple private executable memory regions.
+Private executable memory is correlated with process evidence.
 
-**Why it matters:** private executable memory can be associated with injected or unpacked code.
-
-**Important caveat:** JIT engines, browsers, runtimes, debuggers, and security products can legitimately create executable private regions.
+**Interpretation:** validate with additional memory/process telemetry.
 
 ### Reflective-loading lead
 
-Executable private memory exists without being represented as a conventional loaded module.
+Executable private memory exists without a corresponding module path.
 
-This is a lead for further analysis, not a standalone verdict.
+**Interpretation:** investigate the memory/process context; legitimate software can allocate executable private memory.
 
 ### Thread anomaly
 
-A thread start address falls within private executable memory.
+A thread start address lands in private executable memory.
 
-This may deserve review in an injection investigation, while also having legitimate explanations in complex runtime environments.
+**Interpretation:** investigate thread origin and process behavior.
 
 ### Injection correlation
 
-The rule looks for multiple independent signals on the same process. Correlation is stronger than a single indicator, but it remains an analyst lead.
+Multiple independent indicators are combined.
+
+**Interpretation:** stronger investigative context, still not a malware verdict.
 
 ---
 
-## 5. Evidence limits
+## 5. PE metadata coverage
 
-The Windows advanced collectors intentionally use bounds to prevent runaway enumeration. They prioritize predictable collection over exhaustive memory acquisition.
+`pe_metadata` parses bounded PE structures without executing the file.
 
-Examples of bounded behavior include:
+Current metadata includes:
 
-- maximum process counts;
-- maximum module counts;
-- maximum thread counts;
-- maximum memory regions per process/overall;
-- maximum module hashing volume;
-- maximum module hash size.
+- architecture;
+- PE32/PE32+;
+- image base;
+- section information;
+- section entropy;
+- section permissions;
+- imports;
+- exports;
+- SHA-256;
+- overall entropy;
+- embedded signature metadata;
+- signer metadata when certificate extraction succeeds.
 
-These limits should be reviewed before production deployment if endpoint populations differ significantly from the project's test environment.
+The collector is bounded by file count, file size, import/export count and section count.
 
 ---
 
-## 6. What the Windows memory collector does not do
+## 6. Network evidence limits
 
-The memory-region collector obtains metadata such as:
+Network hunting operates on normalized evidence supplied through the supported network evidence collector.
 
-- base address
-- region size
-- state
-- protection
-- type
-- executable/private classification
+It should not be described as:
 
-It does **not** dump arbitrary process memory or write to it.
+- full packet reconstruction;
+- payload inspection;
+- encrypted traffic decryption;
+- enterprise-scale network detection.
 
-This keeps the collector in the metadata/triage layer rather than turning it into a memory acquisition or process-manipulation tool.
+The intended role is **repeatable evidence-driven network triage**.
+
+---
+
+## 7. Evidence interpretation
+
+All rules should be treated as hypotheses generated from evidence.
+
+The correct analyst workflow is:
+
+```text
+Finding
+  ↓
+Supporting evidence
+  ↓
+Context / baseline
+  ↓
+Additional pivot
+  ↓
+Analyst conclusion
+```
+
+RANDAR intentionally avoids converting a single telemetry pattern into an automatic malware verdict.

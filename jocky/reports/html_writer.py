@@ -7,6 +7,7 @@ scripts) so it can be archived or attached to a case file as-is.
 """
 
 from html import escape
+import json
 from pathlib import Path
 
 from jocky.analysis.finding import SEVERITY_ORDER
@@ -51,6 +52,8 @@ footer{color:var(--mute);font-size:12px;margin-top:40px}
 INJECTION_RULES = {
     "suspicious_module_loads", "dll_sideloading", "process_hollowing_indicators",
     "reflective_load_indicators", "thread_hijacking_indicators", "injection_correlation",
+    "unsigned_loaded_module", "suspicious_imports", "high_entropy_module",
+    "module_disk_mismatch", "suspicious_writable_module",
 }
 
 
@@ -70,10 +73,10 @@ def build_html_string(report: Report) -> str:
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>JOCKY Report - {escape(report.investigation_name)}</title>
+<title>RANDAR Report - {escape(report.investigation_name)}</title>
 <style>{_CSS}</style></head>
 <body>
-<header>{_REPORT_MARK}<div class="brand-copy"><small>JOCKY &middot; Forensic Triage Console</small>
+<header>{_REPORT_MARK}<div class="brand-copy"><small>RANDAR &middot; Forensic Triage Platform</small>
 <h1>{escape(report.investigation_name)}</h1></div></header>
 <main>
 <h2>Summary</h2>
@@ -83,15 +86,62 @@ def build_html_string(report: Report) -> str:
 <dt>Finished</dt><dd>{escape(report.finished_at)}</dd>
 <dt>Report name</dt><dd>{escape(report.report_name or "-")}</dd>
 <dt>Script SHA-256</dt><dd><code>{escape(report.script_hash or "not recorded")}</code></dd>
+<dt>Report SHA-256</dt><dd><code>{escape(report.report_hash or "not recorded")}</code></dd>
+<dt>Product / version</dt><dd>{escape(report.product_name)} {escape(report.product_version)}</dd>
+<dt>Investigation language</dt><dd>{escape(report.dsl_name)} {escape(report.dsl_version)}</dd>
+<dt>Signed bytecode SHA-256</dt><dd><code>{escape(report.bytecode_hash or "not recorded")}</code></dd>
 </dl>
 <h2>Findings by severity</h2><div class="cards">{cards}</div>
 {_injection_section(report)}
+{_pe_section(report)}
+{_network_section(report)}
+{_network_hunting_section(report)}
+{_windows_telemetry_section(report)}
+{_analysis_coverage_section(report)}
+{_provenance_section(report)}
+{_resource_section(report)}
+{_timeline_section(report)}
 <h2>Collector status</h2>
-<table><tr><th>Collector</th><th>Status</th><th>Detail</th></tr>{_collector_rows(report)}</table>
+<table><tr><th>Collector</th><th>Status</th><th>Duration</th><th>Records</th><th>Resource</th><th>Detail</th></tr>{_collector_rows(report)}</table>
 <h2>Findings ({len(report.findings)})</h2>
 <table><tr><th>Severity</th><th>Rule</th><th>Summary</th><th>Reason</th></tr>{_finding_rows(ordered)}</table>
 <footer>Findings are observations for analyst review, not verdicts.</footer>
 </main></body></html>"""
+
+
+def _provenance_section(report: Report) -> str:
+    source = report.source or {}
+    return f"""<h2>Forensic provenance</h2>
+<table><tr><th>Stage</th><th>Value</th></tr>
+<tr><td>Script SHA-256</td><td><code>{escape(report.script_hash or "not recorded")}</code></td></tr>
+<tr><td>Signed bytecode SHA-256</td><td><code>{escape(report.bytecode_hash or "not recorded")}</code></td></tr>
+<tr><td>Evidence source</td><td>{escape(str(source.get("type", "local")))}</td></tr>
+<tr><td>Evidence metadata</td><td><code>{escape(json.dumps(source, sort_keys=True, ensure_ascii=False))}</code></td></tr>
+<tr><td>Report SHA-256</td><td><code>{escape(report.report_hash or "not recorded")}</code></td></tr>
+</table>"""
+
+
+
+def _resource_section(report: Report) -> str:
+    usage = report.resource_usage or {}
+    status = report.execution_status or "complete"
+    badge = "Completed" if status == "complete" else status.replace("_", " ").title()
+    return f"""<h2>Execution & resource accounting</h2>
+<div class="cards">
+<div class="card"><b>{escape(badge)}</b><span>Execution status</span></div>
+<div class="card"><b>{escape(str(usage.get('commands_completed', 0)))}/{escape(str(usage.get('commands_total', 0)))}</b><span>Commands</span></div>
+<div class="card"><b>{escape(str(usage.get('records_collected', 0)))}</b><span>Records collected</span></div>
+<div class="card"><b>{escape(str(usage.get('evidence_bytes', 0)))}</b><span>Evidence bytes</span></div>
+<div class="card"><b>{escape(str(usage.get('timed_out_collectors', 0)))}</b><span>Collector timeouts</span></div>
+<div class="card"><b>{escape(str(usage.get('truncated_collectors', 0)))}</b><span>Truncated collectors</span></div>
+</div>
+<p>{escape(report.termination_reason or 'No execution limit was reached.')}</p>"""
+
+def _timeline_section(report: Report) -> str:
+    rows = "".join(f"<tr><td>{escape(str(e.get('timestamp') or '-'))}</td><td>{escape(str(e.get('type') or '-'))}</td><td>{escape(str(e.get('collector') or '-'))}</td><td>{escape(str(e.get('summary') or '-'))}</td></tr>" for e in (report.timeline or [])[:10000])
+    if not rows:
+        rows='<tr><td colspan="4">No timestamped evidence was available to build a timeline.</td></tr>'
+    return f"<h2>Evidence timeline</h2><table><tr><th>Timestamp</th><th>Event</th><th>Collector</th><th>Summary</th></tr>{rows}</table>"
 
 
 def write_html_report(report: Report, output_path: str) -> None:
@@ -135,23 +185,175 @@ def _injection_section(report: Report) -> str:
 <table style="margin-top:12px"><tr><th>Severity</th><th>Technique indicator</th><th>Summary</th><th>Reason</th></tr>{finding_rows}</table>"""
 
 
+
+def _pe_section(report: Report) -> str:
+    collector = next((c for c in report.collector_results if c.target == "pe_metadata" and c.status == "success"), None)
+    if not collector or not collector.data:
+        return ""
+    data = collector.data
+    files = data.get("files", []) or []
+    findings = [f for f in report.findings if f.rule_name in INJECTION_RULES and f.rule_name not in {
+        "suspicious_module_loads", "dll_sideloading", "process_hollowing_indicators",
+        "reflective_load_indicators", "thread_hijacking_indicators", "injection_correlation"
+    }]
+    cards = "".join(
+        f'<div class="card"><b>{escape(str(value))}</b><span>{escape(label)}</span></div>'
+        for value, label in ((len(files), "PE files"), (sum(1 for x in files if x.get("signature_status") == "embedded_signature"), "Embedded signatures"), (len(findings), "PE indicators"))
+    )
+    rows = "".join(
+        f'<tr><td><code>{escape(str(item.get("filename") or "-"))}</code></td>'
+        f'<td>{escape(str(item.get("architecture") or "-"))}</td>'
+        f'<td>{escape(str(item.get("pe_type") or "-"))}</td>'
+        f'<td>{escape(str(item.get("signature_status") or "-"))}</td>'
+        f'<td><code>{escape(str(item.get("sha256") or "-"))}</code></td></tr>'
+        for item in files[:300]
+    ) or '<tr><td colspan="5">No PE metadata was parsed.</td></tr>'
+    finding_rows = "".join(
+        f'<tr><td><span class="b {_sev_class(f.severity)}">{escape(f.severity.replace("_", " "))}</span></td>'
+        f'<td><code>{escape(f.rule_name)}</code></td><td>{escape(f.summary)}</td><td>{escape(f.reason)}</td></tr>'
+        for f in findings
+    ) or '<tr><td colspan="4">No PE/module indicators were observed.</td></tr>'
+    return (
+        '<h2>PE / module forensics</h2>'
+        '<div class="inj"><strong>Bounded read-only PE metadata</strong> · headers, sections, imports, exports, entropy, signature metadata and SHA-256 are correlated with loaded-module evidence.'
+        f'<div class="cards" style="margin-top:12px">{cards}</div></div>'
+        f'<table style="margin-top:12px"><tr><th>File</th><th>Architecture</th><th>PE type</th><th>Signature</th><th>SHA-256</th></tr>{rows}</table>'
+        f'<table style="margin-top:12px"><tr><th>Severity</th><th>Rule</th><th>Summary</th><th>Reason</th></tr>{finding_rows}</table>'
+    )
+
+
+def _network_section(report: Report) -> str:
+    collector = next((c for c in report.collector_results if c.target == "network_artifacts" and c.status == "success"), None)
+    if not collector or not collector.data:
+        return ""
+    data = collector.data
+    stats = data.get("statistics", {})
+    src = data.get("source", {})
+    cards = "".join(
+        f'<div class="card"><b>{escape(str(stats.get(k) if stats.get(k) is not None else "-"))}</b><span>{escape(label)}</span></div>'
+        for k, label in (("connection_count", "Artifacts"), ("unique_sources", "Sources"), ("unique_destinations", "Destinations"), ("unique_domains", "Domains"))
+    )
+    protocols = "".join(
+        f'<tr><td><code>{escape(str(k))}</code></td><td>{v}</td></tr>'
+        for k, v in stats.get("protocol_counts", {}).items()
+    ) or '<tr><td colspan="2">No protocol metadata.</td></tr>'
+    return (
+        '<h2>Network forensics</h2>'
+        f'<dl><dt>Source file</dt><dd>{escape(str(src.get("filename") or "-"))}</dd>'
+        f'<dt>Source SHA-256</dt><dd><code>{escape(str(src.get("sha256") or "-"))}</code></dd>'
+        f'<dt>First seen</dt><dd>{escape(str(stats.get("first_seen") or "-"))}</dd>'
+        f'<dt>Last seen</dt><dd>{escape(str(stats.get("last_seen") or "-"))}</dd></dl>'
+        f'<div class="cards" style="margin-top:12px">{cards}</div>'
+        f'<table style="margin-top:12px"><tr><th>Protocol</th><th>Count</th></tr>{protocols}</table>'
+    )
+
+
+NETWORK_HUNT_RULES = {
+    "suspicious_dns_queries", "dns_entropy", "rare_domains",
+    "suspicious_tld_patterns", "dns_bursts", "unusual_query_types",
+    "long_random_labels", "dns_tunneling_indicators", "dns_beaconing",
+    "network_beaconing", "port_scan", "horizontal_scan",
+    "service_discovery", "udp_scan", "network_classification",
+    "process_network_correlation",
+}
+
+def _network_hunting_section(report: Report) -> str:
+    findings = [f for f in report.findings if f.rule_name in NETWORK_HUNT_RULES]
+    if not findings:
+        return ""
+    dns = sum(1 for f in findings if f.rule_name in {
+        "suspicious_dns_queries", "dns_entropy", "rare_domains",
+        "suspicious_tld_patterns", "dns_bursts", "unusual_query_types",
+        "long_random_labels", "dns_tunneling_indicators", "dns_beaconing"})
+    network = sum(1 for f in findings if f.rule_name in {"network_beaconing", "port_scan", "horizontal_scan", "service_discovery", "udp_scan"})
+    correlation = sum(1 for f in findings if f.rule_name in {"process_network_correlation", "network_classification"})
+    rows = _finding_rows(sorted(findings, key=lambda f: SEVERITY_ORDER.index(f.severity) if f.severity in SEVERITY_ORDER else -1, reverse=True))
+    return f"""<h2>Network threat hunting</h2>
+<div class="inj"><strong>V1.2 network hunting indicators</strong> · findings are explainable pattern observations generated from normalized network evidence.
+<div class="grid">
+<div class="metric"><b>{len(findings)}</b><span>Total hunt indicators</span></div>
+<div class="metric"><b>{dns}</b><span>DNS indicators</span></div>
+<div class="metric"><b>{network}</b><span>Network indicators</span></div>
+<div class="metric"><b>{correlation}</b><span>Correlation / context</span></div>
+</div></div>
+<table style="margin-top:12px"><tr><th>Severity</th><th>Rule</th><th>Summary</th><th>Reason</th></tr>{rows}</table>
+<p style="color:var(--mute);font-size:12px">Indicators such as beaconing, tunneling, scanning and unusual DNS behavior require analyst validation and environmental context.</p>"""
+
+
+WINDOWS_TELEMETRY_RULES = {
+    "encoded_powershell", "suspicious_powershell_parent",
+    "powershell_network_activity", "powershell_child_processes",
+    "suspicious_services", "writable_service_paths",
+    "persistence_correlation",
+}
+
+def _windows_telemetry_section(report: Report) -> str:
+    collectors = {c.target: c for c in report.collector_results}
+    relevant = [f for f in report.findings if f.rule_name in WINDOWS_TELEMETRY_RULES]
+    present = any(k in collectors for k in ("windows_event_logs", "sysmon_events", "services"))
+    if not present:
+        return ""
+    def count(target: str) -> int:
+        c = collectors.get(target)
+        return int((c.data or {}).get("count") or 0) if c and c.status == "success" else 0
+    rows = _finding_rows(sorted(relevant, key=lambda f: SEVERITY_ORDER.index(f.severity) if f.severity in SEVERITY_ORDER else -1, reverse=True))
+    return f"""<h2>Windows telemetry</h2>
+<div class="inj"><strong>V1.3 Windows read-only telemetry</strong> · PowerShell, Windows Event Log, Sysmon and service evidence are collected through fixed allowlisted queries.
+<div class="grid">
+<div class="metric"><b>{count("windows_event_logs")}</b><span>Windows Event Log records</span></div>
+<div class="metric"><b>{count("sysmon_events")}</b><span>Sysmon records</span></div>
+<div class="metric"><b>{count("services")}</b><span>Services</span></div>
+<div class="metric"><b>{len(relevant)}</b><span>V1.3 indicators</span></div>
+</div></div>
+<table style="margin-top:12px"><tr><th>Severity</th><th>Rule</th><th>Summary</th><th>Reason</th></tr>{rows}</table>
+<p style="color:var(--mute);font-size:12px">PowerShell, service and persistence observations require analyst validation and environmental context.</p>"""
+
+
+def _analysis_coverage_section(report: Report) -> str:
+    rows = []
+    for ar in getattr(report, "analysis_results", []) or []:
+        status = ar.status or "unknown"
+        cls = "st-success" if status == "success" else "st-error"
+        detail = f"{ar.finding_count} finding(s)"
+        if ar.error:
+            detail += f" · {ar.error}"
+        rows.append(
+            f'<tr><td><code>{escape(ar.target)}</code></td>'
+            f'<td><span class="b {cls}">{escape(status)}</span></td>'
+            f'<td>{escape(detail)}</td></tr>'
+        )
+    if not rows:
+        return '<h2>Analysis execution coverage</h2><div>No analysis execution records were stored for this report.</div>'
+    return (
+        f'<h2>Analysis execution coverage ({len(rows)})</h2>'
+        '<table><tr><th>Rule</th><th>Status</th><th>Result</th></tr>'
+        + "".join(rows) + '</table>'
+    )
+
 def _collector_rows(report: Report) -> str:
     rows = []
     for cr in report.collector_results:
-        ok = cr.status != "error"
+        ok = cr.status == "success"
         detail = "OK" if ok else (cr.error or "error")
+        evidence_hash = getattr(cr, "evidence_hash", None)
+        if ok and evidence_hash:
+            detail += f" · evidence SHA-256: {evidence_hash}"
+        resource = f"{getattr(cr, 'resource_bytes', 0)} bytes" + (" · truncated" if getattr(cr, "truncated", False) else "")
         rows.append(
             f"<tr><td><code>{escape(cr.target)}</code></td>"
             f'<td><span class="b {"st-success" if ok else "st-error"}">{escape(cr.status)}</span></td>'
+            f"<td>{getattr(cr, 'duration_ms', 0)} ms</td>"
+            f"<td>{getattr(cr, 'record_count', 0)}</td>"
+            f"<td>{escape(resource)}</td>"
             f"<td>{escape(str(detail))}</td></tr>"
         )
-    return "".join(rows) or "<tr><td colspan='3'>No collectors ran</td></tr>"
+    return "".join(rows) or "<tr><td colspan='6'>No collectors ran</td></tr>"
 
 
 def _finding_rows(findings) -> str:
     rows = [
         f'<tr><td><span class="b {_sev_class(f.severity)}">{escape(f.severity.replace("_", " "))}</span></td>'
-        f"<td><code>{escape(f.rule_name)}</code></td>"
+        f"<td><code>{escape(f.rule_name)}</code><div><code>{escape(f.finding_id or '-') }</code></div></td>"
         f"<td>{escape(f.summary)}</td><td>{escape(f.reason)}</td></tr>"
         for f in findings
     ]

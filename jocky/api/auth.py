@@ -22,7 +22,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 # Environment variable that holds the SHA-256 hex digest of the bearer token.
 # The plaintext token is NEVER stored anywhere — only this digest.
-_TOKEN_DIGEST_ENV = "JOCKY_API_TOKEN_HASH"
+_TOKEN_DIGEST_ENV = "RANDAR_API_TOKEN_HASH"
+_TOKEN_DIGEST_LEGACY_ENV = "JOCKY_API_TOKEN_HASH"
 
 # Reusable scheme instance. auto_error=False so we can return a clean 401
 # rather than FastAPI's default 403 when the header is absent entirely.
@@ -36,15 +37,15 @@ def _load_expected_digest() -> str:
     Raises RuntimeError (not HTTPException) so the server startup check
     can catch it and abort before binding to a port.
     """
-    digest = os.environ.get(_TOKEN_DIGEST_ENV, "").strip()
+    digest = os.environ.get(_TOKEN_DIGEST_ENV, os.environ.get(_TOKEN_DIGEST_LEGACY_ENV, "")).strip()
     if not digest:
         raise RuntimeError(
-            f"JOCKY_API_TOKEN_HASH is not set. "
+            f"RANDAR_API_TOKEN_HASH is not set (JOCKY_API_TOKEN_HASH is accepted for backward compatibility). "
             "Run `python -m jocky.api.token_gen` to create a token."
         )
     if len(digest) != 64 or not all(c in "0123456789abcdef" for c in digest.lower()):
         raise RuntimeError(
-            "JOCKY_API_TOKEN_HASH is malformed — expected a 64-character hex string. "
+            "RANDAR_API_TOKEN_HASH is malformed — expected a 64-character hex string. "
             "Re-run `python -m jocky.api.token_gen`."
         )
     return digest.lower()

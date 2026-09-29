@@ -1,0 +1,23 @@
+investigation "Windows Injection and PE Forensics" {
+    collect system_info;
+    collect processes;
+    collect modules;
+    collect threads;
+    collect memory_regions;
+    collect network_connections;
+    collect pe_metadata;
+
+    analyze suspicious_module_loads;
+    analyze dll_sideloading;
+    analyze process_hollowing_indicators;
+    analyze reflective_load_indicators;
+    analyze thread_hijacking_indicators;
+    analyze injection_correlation;
+    analyze unsigned_loaded_module;
+    analyze suspicious_imports;
+    analyze high_entropy_module;
+    analyze module_disk_mismatch;
+    analyze suspicious_writable_module;
+
+    report "windows_injection_pe_forensics";
+}

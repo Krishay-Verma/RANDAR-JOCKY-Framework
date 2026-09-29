@@ -1,45 +1,79 @@
-# JOCKY Deployment Guide
+# RANDAR Deployment Guide
 
 ## 1. Supported deployment model
 
-JOCKY currently works best as a local or controlled internal forensic console.
+The repository is designed primarily for:
 
-The primary development/demo target is **Windows**, because the advanced DLL/module/thread/memory telemetry is Windows-specific.
+- local forensic triage;
+- controlled Windows laboratory systems;
+- SIH demonstration environments;
+- authorized remote-agent experiments.
 
-Cross-platform collectors also support Linux.
+The current architecture is not intended to be exposed directly to the public Internet.
 
 ---
 
 ## 2. Prerequisites
 
+### Python
+
+Python 3.10 or newer.
+
+### Node.js
+
+Node.js 20.19+ or 22.12+ for the current Vite toolchain.
+
 ### Windows
 
-- Windows 10/11 or a compatible Windows Server environment
-- Python 3.10+
-- Node.js 20.19+ or 22.12+
-- PowerShell for the provided wrapper script
+Required for:
+
+- modules;
+- threads;
+- memory regions;
+- Windows Event Logs;
+- Sysmon;
+- services;
+- PE metadata.
 
 ### Linux
 
-- Python 3.10+
-- Node.js 20.19+ or 22.12+ for frontend builds
-- standard build/runtime tooling
+Supported for the cross-platform collectors.
+
+Windows-only collectors return explicit unsupported status.
 
 ---
 
 ## 3. Recommended first run
 
-```powershell
+From the project root:
+
+```bash
 python start.py
 ```
 
-If PowerShell is preferred:
+Windows:
 
 ```powershell
 .\start.ps1
 ```
 
-The launcher performs environment checks and builds the frontend when needed.
+Linux/macOS:
+
+```bash
+./start.sh
+```
+
+The launcher can:
+
+1. create the virtual environment;
+2. install Python dependencies;
+3. create/update `.env`;
+4. generate API-token material;
+5. generate the JOCKY/RANDAR bytecode signing key;
+6. install frontend dependencies;
+7. build the frontend;
+8. start Uvicorn;
+9. open the console.
 
 ---
 
@@ -49,124 +83,145 @@ The launcher performs environment checks and builds the frontend when needed.
 python start.py --dev
 ```
 
-Use this while editing the React console or Python API.
+This starts:
 
-For a production-like local run:
+- API with reload;
+- Vite development server.
 
-```bash
-python start.py
-```
-
----
-
-## 5. Configuration
-
-The project uses `.env` and environment variables.
-
-Important configuration areas include:
-
-- API authentication token hash
-- bytecode signing key
-- database path
-- evidence directory
-- API documentation visibility
-- frontend API configuration where applicable
-
-Never commit `.env` or private investigator keys to source control.
-
----
-
-## 6. Evidence directory
-
-`file_hash` does not accept an arbitrary path from the DSL.
-
-The directory is selected by the operator/environment using `JOCKY_EVIDENCE_DIR` or defaults to the project's `sample_evidence` directory.
-
-This prevents a script from choosing arbitrary filesystem targets to hash.
-
----
-
-## 7. Remote agent
-
-Register an agent in the console and use the generated ID/token.
-
-Example:
-
-```bash
-python -m jocky.agent \
-  --api-url https://jocky.example.org \
-  --agent-id <id> \
-  --agent-token <token>
-```
-
-Environment variables are also supported:
+The frontend normally runs on:
 
 ```text
-JOCKY_API_URL
-JOCKY_AGENT_ID
-JOCKY_AGENT_TOKEN
-JOCKY_POLL_INTERVAL
-JOCKY_TLS_VERIFY
+http://localhost:5173
 ```
-
-Keep TLS verification enabled outside controlled development environments.
 
 ---
 
-## 8. Encrypted report workflow
-
-Generate an investigator key pair:
+## 5. Useful commands
 
 ```bash
-python -m jocky.api.key_gen
+python start.py --new-token
+python start.py --rebuild
+python start.py --no-browser
+python start.py --host 127.0.0.1 --port 9000
 ```
 
-Register the public key in **Report encryption** in the console.
-
-Export an encrypted report.
-
-Decrypt it on the investigator workstation with the private key:
-
-```bash
-python -m jocky.api.decrypt_report \
-  --key jocky_investigator.key \
-  --input jocky_report_1.enc \
-  --output report.json
-```
-
-Protect the private key as a high-value forensic secret.
+Binding to a non-loopback address should be treated as a network deployment and protected accordingly.
 
 ---
 
-## 9. API documentation
+## 6. Configuration
 
-When enabled:
+Important environment settings include:
+
+```text
+RANDAR_API_TOKEN_HASH
+RANDAR_BYTECODE_KEY
+RANDAR_DB_PATH
+JOCKY_EVIDENCE_DIR
+RANDAR_OPERATOR_NAME
+JOCKY_CORS_ORIGINS
+```
+
+Legacy `JOCKY_*` names remain accepted in selected compatibility paths.
+
+Do not commit real secrets to source control.
+
+---
+
+## 7. Evidence directory
+
+The `file_hash` collector is deliberately restricted to an operator-configured evidence directory.
+
+The directory is resolved by the collector registry and cannot be selected dynamically by a JOCKY script.
+
+This is a key security boundary.
+
+---
+
+## 8. Database
+
+The primary SQLite database is created by the application.
+
+It stores case and audit information.
+
+Back up the database before upgrading a demonstration or laboratory deployment if the case history matters.
+
+For production scale, a durable multi-user datastore would be preferable.
+
+---
+
+## 9. Remote agents
+
+The agent model is:
+
+```text
+API
+ │
+ ├── register agent
+ │
+ ├── dispatch job
+ │
+ └── receive result
+       ▲
+       │ polling
+       │
+    Agent
+       │
+       ▼
+   JOCKY runtime
+```
+
+Agent registration produces:
+
+- agent ID;
+- one-time token.
+
+The server stores only the token digest.
+
+Agents should be deployed only to authorized endpoints.
+
+---
+
+## 10. Encrypted reports
+
+To export encrypted reports:
+
+1. generate or load the investigator RSA key pair;
+2. register the public key;
+3. execute/export the investigation;
+4. download the encrypted artifact;
+5. retain the private key separately.
+
+The current prototype keeps the active public key in process memory.
+
+---
+
+## 11. API documentation
+
+After startup:
 
 ```text
 http://127.0.0.1:8000/docs
 ```
 
-The OpenAPI schema reflects the running API.
+The OpenAPI interface exposes the authenticated API surface.
 
 ---
 
-## 10. Operational checklist
+## 12. Validation checklist
 
-Before an investigation:
+Before a demonstration:
 
-- confirm the correct endpoint;
-- confirm the analyst identity/session;
-- verify required privileges;
-- verify the JOCKY script;
-- validate without executing;
-- confirm collectors are appropriate for the platform;
-- confirm storage capacity.
-
-After an investigation:
-
-- review collector errors;
-- review high/critical indicators;
-- inspect related evidence;
-- preserve the investigation database/report;
-- export/encrypt the report if required;
-- record analyst conclusions separately from automated findings.
+- [ ] `pytest -q` passes.
+- [ ] API starts successfully.
+- [ ] Console loads.
+- [ ] Authentication works.
+- [ ] `/api/catalog` reports expected capabilities.
+- [ ] A simple investigation validates.
+- [ ] IR/bytecode inspection works.
+- [ ] A controlled investigation completes.
+- [ ] Evidence pagination works.
+- [ ] HTML/JSON report export works.
+- [ ] Integrity verification works.
+- [ ] Encrypted export works if demonstrated.
+- [ ] Windows-only demonstrations are performed on Windows.

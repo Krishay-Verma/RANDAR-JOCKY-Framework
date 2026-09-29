@@ -52,14 +52,21 @@ Expr = LiteralExpr | VarExpr | PropertyExpr
 
 @dataclass
 class Condition:
-    """
-    A binary comparison used in 'if' guards.
+    """Boolean condition tree. Leaf nodes contain a comparison."""
+    left: Expr | None = None
+    operator: str = "=="
+    right: Expr | None = None
+    kind: str = "comparison"
+    children: list["Condition"] = field(default_factory=list)
 
-    operator is one of: > < >= <= == !=
-    """
-    left: Expr
-    operator: str
-    right: Expr
+
+@dataclass
+class UserRuleCommand:
+    """Bounded analyst-authored rule over finding evidence."""
+    name: str
+    condition: Condition
+    severity: str
+    line: int
 
 
 # ── Command nodes ──────────────────────────────────────────────────────────────
@@ -74,6 +81,7 @@ class CollectCommand:
 class AnalyzeCommand:
     rule: str
     line: int
+    where: Condition | None = None
 
 
 @dataclass
@@ -106,7 +114,7 @@ class IfCommand:
 
 
 # Union type for all command kinds (referenced by IfCommand above).
-Command = CollectCommand | AnalyzeCommand | ReportCommand | LetCommand | IfCommand
+Command = CollectCommand | AnalyzeCommand | ReportCommand | LetCommand | IfCommand | UserRuleCommand
 
 
 # ── Root node ──────────────────────────────────────────────────────────────────

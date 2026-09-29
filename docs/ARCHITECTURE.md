@@ -1,289 +1,416 @@
-# JOCKY Architecture
+# RANDAR Architecture
 
 ## 1. System view
 
 ```text
-                         ┌─────────────────────┐
-                         │    Web Console       │
-                         │ React + Vite         │
-                         └──────────┬──────────┘
-                                    │ HTTP/JSON
-                                    ▼
-                         ┌─────────────────────┐
-                         │     FastAPI API      │
-                         │ auth / cases / jobs  │
-                         └──────────┬──────────┘
-                                    │
-                    ┌───────────────┴────────────────┐
-                    ▼                                ▼
-          ┌─────────────────┐              ┌─────────────────┐
-          │ Language Engine │              │ Remote Agent    │
-          │ lexer/parser/IR │              │ poll + execute  │
-          └────────┬────────┘              └────────┬────────┘
-                   │                                │
-                   └──────────────┬─────────────────┘
-                                  ▼
-                       ┌────────────────────┐
-                       │    Interpreter     │
-                       │ allowlisted calls  │
-                       └─────────┬──────────┘
-                                 │
-              ┌──────────────────┼──────────────────┐
-              ▼                  ▼                  ▼
-       ┌────────────┐     ┌────────────┐     ┌─────────────┐
-       │ Collectors │     │   Rules    │     │  Bytecode   │
-       │ endpoint   │     │ evidence→ │     │ signed IR   │
-       │ evidence   │     │ findings   │     │ execution   │
-       └──────┬─────┘     └─────┬──────┘     └─────────────┘
-              │                 │
-              └────────┬────────┘
-                       ▼
-                ┌──────────────┐
-                │ Report model │
-                └──────┬───────┘
-                       ▼
-             ┌─────────────────────┐
-             │ SQLite / HTML / ENC │
-             └─────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                     RANDAR Web Console                      │
+│ React + Vite                                                │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ HTTP/JSON + Bearer auth
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                         FastAPI API                         │
+│ Auth · Investigations · Jobs · Catalog · Reports · Agents  │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                       JOCKY Engine                          │
+│ Lexer → Parser → IR → Interpreter                          │
+│                    ↘ signed bytecode                        │
+└───────────────┬───────────────────────┬─────────────────────┘
+                │                       │
+                ▼                       ▼
+       ┌────────────────┐      ┌────────────────────┐
+       │  Collectors    │      │  Analysis Rules    │
+       │  17 registered │      │  40 registered     │
+       └───────┬────────┘      └──────────┬─────────┘
+               │                          │
+               └──────────┬───────────────┘
+                          ▼
+                  ┌───────────────┐
+                  │ Report Builder│
+                  │ + Integrity   │
+                  └───────┬───────┘
+                          ▼
+                 ┌─────────────────┐
+                 │ SQLite / Reports│
+                 └─────────────────┘
 ```
 
 ---
 
 ## 2. Frontend
 
-Location: `frontend/src/`
+The frontend is a React/Vite application.
 
-Technology:
+Current routes/pages include:
 
-- React
-- React Router
-- Vite
-- Plain CSS
+- sign-in;
+- dashboard;
+- investigations;
+- new investigation;
+- investigation detail;
+- search;
+- agents;
+- network evidence;
+- injection analysis;
+- Windows telemetry;
+- bytecode;
+- investigator keys.
 
-Major pages include:
-
-- Dashboard
-- Investigations
-- New Investigation
-- Investigation Detail
-- Endpoint Agents
-- Bytecode
-- DLL / Injection
-- Report Encryption
-
-The frontend obtains capability metadata from `GET /api/catalog` rather than maintaining an independent hard-coded list of collectors and rules.
-
-This reduces drift between the engine and the console.
+The frontend calls the backend through a centralized API client and receives the current collector/rule catalog from the backend.
 
 ---
 
 ## 3. API layer
 
-Location: `jocky/api/`
+The API is implemented with FastAPI.
 
-The FastAPI layer provides:
+Major route families:
 
-- authentication
-- investigation execution
-- validation
-- IR inspection
-- investigation CRUD
-- statistics
-- report generation
-- report encryption
-- key registration
-- bytecode operations
-- remote-agent operations
+```text
+/api/health
+/api/investigations/*
+/api/validate
+/api/compile
+/api/catalog
+/api/stats
+/api/search
+/api/keys/*
+/api/network-sources/*
+/api/agents/*
+/api/bytecode/*
+/api/audit
+```
 
-The public router intentionally exposes only `/api/health`. Protected application routes use a router-level bearer-token dependency.
+All protected operations use the bearer-token authentication dependency.
 
 ---
 
-## 4. Language engine
+## 4. Authentication
 
-Location: `jocky/language/`
+The API uses a single-operator bearer token model.
+
+The server stores only the SHA-256 digest of the token.
+
+Verification uses constant-time digest comparison.
+
+The launcher generates a token on first setup and writes only its digest to configuration.
+
+This is appropriate for the current prototype but should be replaced with a stronger identity/authorization model for multi-operator production deployment.
+
+---
+
+## 5. Language engine
 
 ### Lexer
 
-`lexer.py` converts source text to tokens.
+`jocky/language/lexer.py`
+
+Responsibilities:
+
+- tokenize JOCKY source;
+- enforce lexical limits;
+- reject unsupported characters;
+- distinguish reserved words;
+- handle comments;
+- parse bounded integer literals.
 
 ### Parser
 
-`parser.py` implements the grammar and creates the IR.
+`jocky/language/parser.py`
+
+Responsibilities:
+
+- recursive-descent grammar;
+- statement parsing;
+- expression parsing;
+- boolean condition trees;
+- nested `if` blocks;
+- analyst-authored rules.
 
 ### IR
 
-`ir.py` contains the intermediate representation used by the interpreter and bytecode path.
+`jocky/language/ir.py`
 
-### Interpreter
+The IR uses dataclasses for:
 
-`interpreter.py` evaluates commands against the registered collectors and rules.
+- literals;
+- variables;
+- property access;
+- conditions;
+- collect commands;
+- analysis commands;
+- report commands;
+- variable declarations;
+- conditionals;
+- analyst-authored rules.
 
-### Bytecode
-
-`bytecode.py` serializes a controlled command representation, signs it, verifies it, and reconstructs the same IR before execution.
+The IR is the common representation used by the interpreter and bytecode path.
 
 ---
 
-## 5. Collector architecture
+## 6. Interpreter
 
-Location: `jocky/collectors/`
+`jocky/language/interpreter.py`
 
-Every collector is an explicit function registered in `collectors/registry.py`.
+The interpreter:
 
-The registry is a security boundary:
+1. validates capability references;
+2. evaluates variables and conditions;
+3. dispatches collectors;
+4. dispatches analysis rules;
+5. tracks progress;
+6. enforces runtime limits;
+7. supports cancellation;
+8. records collector status and resource information.
+
+Collector calls execute through bounded worker threads so a stuck collector can be recorded as timed out without blocking the API process indefinitely.
+
+---
+
+## 7. Bytecode
+
+`jocky/language/bytecode.py`
+
+Bytecode contains a length-delimited header and body plus an HMAC-SHA256 signature.
+
+The verifier checks:
+
+- minimum structure;
+- signature;
+- magic value;
+- format version;
+- command count;
+- opcode shape;
+- collector/rule existence;
+- condition structure;
+- variable structure;
+- branch bounds.
+
+This is a **tamper-evident serialization of the investigation model**, not a general-purpose virtual machine.
+
+---
+
+## 8. Collector architecture
+
+Collectors are explicitly registered in:
 
 ```text
-JOCKY script
-    │
-    │ collect modules;
-    ▼
-registry lookup
-    │
-    ├── known → invoke collector
-    └── unknown → reject
+jocky/collectors/registry.py
 ```
 
-Collectors should be:
+This registry is the execution boundary.
 
-- read-only
-- bounded
-- deterministic where practical
-- explicit about unsupported platforms
-- tolerant of per-field access failures
-- serializable to JSON-compatible data
+A collector receives no arbitrary JOCKY arguments. Operator configuration is kept outside the script where required, such as the fixed evidence directory used by `file_hash`.
+
+This prevents the DSL from turning a controlled collector into an unrestricted file or command interface.
 
 ---
 
-## 6. Analysis architecture
+## 9. Analysis architecture
 
-Location: `jocky/analysis/`
-
-Rules are intended to be pure evidence-in/finding-out functions.
+Analysis rules are explicitly registered in:
 
 ```text
-collector results
-       │
-       ▼
- evidence dictionary
-       │
-       ▼
- analysis rule
-       │
-       ▼
- list[Finding]
+jocky/analysis/registry.py
 ```
 
-This separation means an analysis rule does not need to open a socket, inspect a process directly, or invoke a shell command.
-
----
-
-## 7. Windows advanced telemetry
-
-### Modules
-
-`modules.py` uses process memory-map metadata exposed by `psutil`. It bounds process/module enumeration and hashes only selected user-writable modules within configured limits.
-
-### Threads
-
-`threads.py` enumerates process threads and, on Windows, uses a native read-only query for thread start-address metadata.
-
-### Memory regions
-
-`memory_regions.py` uses `VirtualQueryEx` to obtain virtual-memory region metadata. It does not call `ReadProcessMemory` and does not modify memory.
-
-### Injection rules
-
-`injection_rules.py` correlates those evidence sources. The rules intentionally use cautious language because a single indicator can have legitimate explanations.
-
----
-
-## 8. Persistence
-
-Location: `jocky/storage/database.py`
-
-SQLite stores one investigation row per case.
-
-The complete report is stored as JSON. Case metadata is kept in separate columns.
-
-This distinction is intentional:
+The intended contract is:
 
 ```text
-Immutable evidence/report JSON
-          │
-          ├── never changed by case editing
-          │
-Editable case metadata
-          ├── display name
-          ├── status
-          └── analyst notes
+evidence dictionary
+       ↓
+pure/bounded rule function
+       ↓
+list[Finding]
 ```
 
-The database uses WAL mode and additive migrations.
+Rules do not execute binaries or modify processes.
 
 ---
 
-## 9. Reporting
+## 10. Windows telemetry
 
-Location: `jocky/reports/`
-
-The report pipeline is split into:
-
-- report model
-- report builder
-- JSON serialization
-- HTML rendering
-- encryption
-
-The source script hash is included in the report model, allowing the analyst to connect the result to the exact source definition used to produce it.
-
----
-
-## 10. Remote agent architecture
-
-The agent is intentionally simple:
+The advanced Windows path is divided into independent evidence surfaces:
 
 ```text
-Endpoint Agent
-     │
-     │ GET pending job
-     ▼
-Central API
-     │
-     │ job
-     ▼
-Agent executes locally
-     │
-     ├── lex
-     ├── parse
-     ├── interpret
-     └── collect/analyze
-     │
-     ▼
-POST result
+processes
+   │
+   ├── modules
+   ├── threads
+   ├── memory_regions
+   └── pe_metadata
+            │
+            ▼
+       PE/injection rules
 ```
 
-The agent does not receive a separate privileged command language. It receives JOCKY source and executes it through the same engine.
+This makes the final finding a correlation of evidence rather than a single heuristic.
 
 ---
 
-## 11. Extension workflow
+## 11. Network evidence
 
-To add a collector:
+`network_artifacts` normalizes supported DNS/connection evidence.
 
-1. Create `jocky/collectors/<name>.py`.
-2. Keep it read-only and bounded.
-3. Return JSON-compatible data.
-4. Register it in `collectors/registry.py`.
-5. Add a catalog description in `api/catalog.py`.
-6. Add tests.
+The analysis layer can then evaluate patterns such as:
 
-To add a rule:
+- entropy;
+- rare domains;
+- bursts;
+- beaconing;
+- scans;
+- service discovery.
 
-1. Create or extend an analysis module.
-2. Make the rule consume evidence rather than directly collecting new data.
-3. Register it in `analysis/registry.py`.
-4. Add catalog metadata.
-5. Add regression tests.
+The collector deliberately does not retain arbitrary packet payloads.
 
-The console automatically receives the registered capability through the catalog endpoint.
+---
+
+## 12. Persistence
+
+The case store uses SQLite.
+
+Stored case information includes:
+
+- investigation metadata;
+- report JSON;
+- status;
+- notes;
+- finding/severity summaries;
+- timestamps;
+- integrity metadata.
+
+Evidence is stored inside the report structure rather than as a separate unrestricted blob store.
+
+The audit layer maintains append-oriented audit events containing:
+
+- timestamp;
+- operator identity;
+- action;
+- investigation context;
+- script hash;
+- result/report hash;
+- action details.
+
+---
+
+## 13. Report construction
+
+`jocky/reports/builder.py` is the boundary between investigation results and the report model.
+
+It adds:
+
+- deterministic finding IDs;
+- evidence references;
+- collector evidence hashes;
+- timeline events;
+- source metadata;
+- script/bytecode hashes;
+- execution metadata;
+- resource accounting.
+
+This keeps report assembly separate from collection and analysis.
+
+---
+
+## 14. Report protection
+
+`jocky/reports/encryptor.py` implements:
+
+```text
+random AES-256 key
+        ↓
+AES-256-GCM report encryption
+        ↓
+RSA-OAEP/SHA-256 wrapping
+        ↓
+encrypted report blob
+```
+
+The current server-side key store keeps the active investigator public key in process memory.
+
+A production deployment should use an external key-management solution and explicit operator identity.
+
+---
+
+## 15. Remote agent
+
+The agent communicates through the API using polling.
+
+Core state:
+
+```text
+registered
+    ↓
+pending job
+    ↓
+claimed/running
+    ├── complete
+    ├── failed
+    └── cancelled
+```
+
+The implementation provides:
+
+- token hashing;
+- registration;
+- revocation;
+- capability reporting;
+- heartbeat;
+- job signatures;
+- nonce/expiry;
+- bounded job count;
+- cancellation.
+
+The agent executes the same JOCKY pipeline as local execution.
+
+---
+
+## 16. Extension workflow
+
+### New collector
+
+1. implement collector;
+2. keep collection bounded;
+3. define unsupported-platform behavior;
+4. register it;
+5. add catalog metadata;
+6. add tests;
+7. document evidence schema.
+
+### New rule
+
+1. implement evidence-in/finding-out rule;
+2. avoid side effects;
+3. register it;
+4. add catalog metadata;
+5. add report evidence mapping where needed;
+6. add regression tests;
+7. document interpretation and limitations.
+
+### New frontend capability
+
+1. expose backend data through an authenticated route;
+2. add API client support;
+3. add the page/component;
+4. use the live capability catalog where applicable;
+5. preserve loading/error/cancellation behavior.
+
+---
+
+## 17. Architectural invariants
+
+Future changes should preserve:
+
+- no arbitrary JOCKY command execution;
+- explicit collector/rule registration;
+- bounded collection;
+- read-only Windows advanced telemetry;
+- common IR between source and bytecode;
+- authenticated API routes;
+- evidence-driven analysis;
+- report integrity metadata;
+- clear separation between evidence and conclusions.

@@ -1,199 +1,202 @@
-# JOCKY SIH Demo Playbook
+# RANDAR SIH 2026 Demo Playbook
 
-## Objective
+**Objective:** demonstrate the implemented technical architecture, not only the interface.
 
-Demonstrate the complete JOCKY value proposition in a short, reproducible workflow:
+---
+
+## 1. Opening statement
+
+Use a concise framing:
+
+> RANDAR turns a forensic investigation into a controlled executable artifact. JOCKY defines the investigation, the runtime restricts what that script can do, collectors acquire evidence, deterministic rules correlate it, and the resulting case retains provenance and integrity metadata.
+
+---
+
+## 2. Show the architecture
 
 ```text
-New investigation
-      ↓
-Write JOCKY script
-      ↓
-Validate
-      ↓
-Inspect IR
-      ↓
-Run on Windows endpoint
-      ↓
-Collect process/network/module/thread/memory evidence
-      ↓
-Correlate indicators
-      ↓
-Review evidence
-      ↓
-Export protected report
+JOCKY
+  ↓
+IR
+  ↓
+Controlled execution
+  ↓
+Collectors
+  ↓
+Evidence
+  ↓
+Analysis
+  ↓
+Findings
+  ↓
+Case + report
 ```
 
----
-
-## 1. Open the console
-
-Start JOCKY and sign in.
-
-Show:
-
-- Dashboard
-- Investigations
-- DLL / injection navigation item
-- Endpoint agents
-- Bytecode
-- Report encryption
-
-Avoid spending the demonstration on generic dashboard animations. The product value is the investigation pipeline.
-
----
-
-## 2. Show the problem
-
-Explain that traditional triage can require a collection of independent commands and tools.
-
-Then introduce JOCKY's model:
-
-> “The investigation itself becomes executable, reviewable code.”
+Explain that the same model is used for local and remote execution.
 
 ---
 
 ## 3. Show the language
 
-Open **New investigation** and paste:
+Open the JOCKY editor and demonstrate a small script:
 
 ```text
-investigation "Windows Injection Forensics" {
+investigation "Endpoint Network Review" {
     collect system_info;
     collect processes;
-    collect modules;
-    collect threads;
-    collect memory_regions;
     collect network_connections;
-
-    analyze suspicious_module_loads;
-    analyze dll_sideloading;
-    analyze process_hollowing_indicators;
-    analyze reflective_load_indicators;
-    analyze thread_hijacking_indicators;
-    analyze injection_correlation;
-
-    report "windows_injection_forensics";
+    analyze process_network_correlation;
+    report "endpoint_network_review";
 }
 ```
 
-Explain that this is not Python, PowerShell, or a shell command. It is JOCKY's purpose-built investigation language.
+The key point is that the script describes **investigative intent** rather than arbitrary operating-system commands.
 
 ---
 
 ## 4. Validate before execution
 
-Use **Validate**.
+Demonstrate validation.
 
-Point out:
+Explain:
 
-- lexer/parser validation occurs first;
-- malformed scripts fail before collection;
-- the engine knows only explicitly registered capabilities.
+- syntax is checked;
+- collector/rule names are checked;
+- unsupported capabilities are rejected;
+- the script can be inspected before evidence collection.
 
 ---
 
-## 5. Show IR/bytecode
+## 5. Show IR / bytecode
 
-Use the bytecode/IR view to show:
+Use the bytecode/IR view to demonstrate that:
 
 ```text
-Source
- ↓
-Tokens
- ↓
+source
+  ↓
 IR
- ↓
-Signed bytecode
+  ↓
+signed representation
 ```
 
-The important demonstration point is that the language is implemented as an actual execution pipeline rather than a text box that launches shell commands.
+The important architectural point:
+
+> Bytecode is not an unrestricted second runtime. It is verified and mapped back into the same controlled investigation model.
 
 ---
 
-## 6. Run the investigation
+## 6. Run an investigation
 
-After execution, open the investigation detail page.
+Choose an evidence set appropriate to the demonstration machine.
 
-Highlight:
+Review:
 
-- endpoint identity
-- execution duration
-- script hash
-- collector counts
-- findings
-- evidence
+- collector status;
+- record counts;
+- truncation;
+- execution time;
+- findings;
+- evidence references.
 
-Then open **DLL / injection**.
+Do not claim that every endpoint will expose identical evidence; permissions and platform state matter.
 
 ---
 
-## 7. Explain the Windows injection telemetry
+## 7. Demonstrate Windows advanced telemetry
 
-Show the three evidence families:
+On a controlled Windows system, show:
 
 ```text
-Loaded Modules
-      +
-Threads
-      +
-Virtual Memory Regions
-      ↓
-Injection Correlation
+modules
+threads
+memory_regions
+pe_metadata
 ```
 
-Emphasize that JOCKY is observing forensic indicators rather than performing injection.
+Then explain how these evidence sources can be correlated into:
+
+- module-loading leads;
+- DLL sideloading leads;
+- private executable memory leads;
+- thread/memory correlations;
+- PE import/entropy/signature findings.
+
+Explicitly state that the collectors do not modify processes.
 
 ---
 
 ## 8. Explain a finding
 
-Choose one indicator and walk through:
+For every finding, use:
 
 ```text
-Technique
-Process
-Module / memory evidence
-Why it was flagged
-Severity
-Related evidence
+What was observed?
+        ↓
+Which evidence supports it?
+        ↓
+Why is it interesting?
+        ↓
+What should the analyst check next?
 ```
 
-Always state that an indicator is a lead for human review, not an automatic malware verdict.
+Avoid presenting a heuristic as proof of maliciousness.
 
 ---
 
 ## 9. Demonstrate reporting
 
-Generate the HTML report.
+Show:
 
-Show that the report contains:
+- HTML report;
+- JSON report;
+- integrity verification;
+- encrypted export if prepared.
 
-- investigation identity
-- timing
-- script hash
-- collector output
-- findings
-- injection analysis
-- evidence context
+Point out:
 
-Then demonstrate encrypted export if time permits.
+- script hash;
+- evidence hashes;
+- finding IDs;
+- execution status;
+- timeline;
+- collector results.
 
 ---
 
-## 10. Closing statement
+## 10. Demonstrate remote execution only if stable
 
-The strongest closing message is:
+If the agent demonstration is reliable:
 
-> **JOCKY turns forensic investigation logic into secure, repeatable, executable code.**
+1. register an authorized agent;
+2. show capability status;
+3. dispatch a bounded investigation;
+4. show polling;
+5. show completion/result;
+6. explain revocation.
 
-The product is not simply another process viewer. Its core innovation is the combination of:
+Do not make the remote feature the central demonstration if endpoint networking is unreliable.
 
-- a purpose-built forensic language;
-- controlled execution;
-- modular collectors;
-- evidence-driven analysis;
-- Windows advanced telemetry;
-- provenance and signed bytecode;
-- remote endpoint execution;
-- protected reporting.
+---
+
+## 11. Closing statement
+
+A strong technical close is:
+
+> RANDAR is not simply a collection of forensic scripts. It provides a language, execution boundary, evidence layer, analysis layer, integrity model, reporting pipeline and remote execution architecture around the investigation itself.
+
+Then show the repository structure and tests if time permits.
+
+---
+
+## 12. What not to claim
+
+Do not claim:
+
+- complete EDR replacement;
+- complete memory forensics;
+- automatic malware attribution;
+- certified chain of custody;
+- arbitrary security-control bypass;
+- full enterprise-scale SOC functionality.
+
+The implemented prototype is stronger when its boundaries are stated clearly.

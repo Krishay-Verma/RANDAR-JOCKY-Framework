@@ -1,0 +1,64 @@
+investigation "Domain Expansion Triage" {
+    // Full read-only capability sweep. Select a Zeek/PCAP/PCAPNG source
+    // in the investigation builder so network_artifacts can ingest evidence.
+    collect system_info;
+    collect processes;
+    collect network_connections;
+    collect network_artifacts;
+    collect windows_event_logs;
+    collect sysmon_events;
+    collect services;
+    collect pe_metadata;
+    collect logged_in_users;
+    collect file_hash;
+    collect scheduled_tasks;
+    collect startup_items;
+    collect open_files;
+    collect local_users;
+    collect modules;
+    collect threads;
+    collect memory_regions;
+
+    analyze missing_paths;
+    analyze suspicious_processes;
+    analyze process_network_correlation;
+    analyze unusual_scheduled_tasks;
+    analyze suspicious_startup_items;
+    analyze high_connection_processes;
+    analyze privileged_user_anomaly;
+    analyze suspicious_module_loads;
+    analyze dll_sideloading;
+    analyze process_hollowing_indicators;
+    analyze reflective_load_indicators;
+    analyze thread_hijacking_indicators;
+    analyze injection_correlation;
+    analyze suspicious_dns_queries;
+    analyze dns_entropy;
+    analyze rare_domains;
+    analyze suspicious_tld_patterns;
+    analyze dns_bursts;
+    analyze unusual_query_types;
+    analyze long_random_labels;
+    analyze dns_tunneling_indicators;
+    analyze dns_beaconing;
+    analyze network_beaconing;
+    analyze port_scan;
+    analyze horizontal_scan;
+    analyze service_discovery;
+    analyze udp_scan;
+    analyze network_classification;
+    analyze encoded_powershell;
+    analyze suspicious_powershell_parent;
+    analyze powershell_network_activity;
+    analyze powershell_child_processes;
+    analyze suspicious_services;
+    analyze writable_service_paths;
+    analyze persistence_correlation;
+    analyze unsigned_loaded_module;
+    analyze suspicious_imports;
+    analyze high_entropy_module;
+    analyze module_disk_mismatch;
+    analyze suspicious_writable_module;
+
+    report "domain_expansion_triage";
+}

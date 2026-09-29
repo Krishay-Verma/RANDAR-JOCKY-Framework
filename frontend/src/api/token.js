@@ -1,5 +1,5 @@
 /**
- * Bearer-token storage for the JOCKY dashboard.
+ * Bearer-token storage for the RANDAR dashboard.
  *
  * Uses sessionStorage: the token is cleared when the tab closes, and is
  * never written to disk-persistent storage. Every access is wrapped in

@@ -1,92 +1,226 @@
-# JOCKY Project Structure
+# RANDAR Project Structure
 
 ## Root
 
-| Path | Responsibility |
-|---|---|
-| `start.py` | Cross-platform environment/setup/launch orchestration. |
-| `start.ps1` | Windows launcher wrapper. |
-| `start.sh` | Unix launcher wrapper. |
-| `requirements.txt` | Python runtime dependencies. |
-| `.env.example` | Environment configuration template. |
-| `tests/` | Regression and security-boundary tests. |
-| `sample_evidence/` | Controlled sample data for hashing/demo workflows. |
-| `docs/` | Product, architecture, DFIR and operational documentation. |
+```text
+RANDAR/
+├── jocky/
+├── frontend/
+├── docs/
+├── examples/
+├── tests/
+├── sample_evidence/
+├── network_evidence/
+├── start.py
+├── start.ps1
+├── start.sh
+├── requirements.txt
+└── README.md
+```
+
+The repository's Python package is named `jocky/` because JOCKY is the investigation language/runtime inside the RANDAR product.
+
+---
 
 ## Backend
 
 ### `jocky/language/`
 
+Core Forensics-as-Code engine.
+
 | File | Responsibility |
 |---|---|
-| `lexer.py` | Source-to-token conversion. |
-| `parser.py` | Grammar validation and IR construction. |
-| `ir.py` | Investigation command dataclasses. |
-| `interpreter.py` | Executes IR against allowlisted capabilities. |
-| `bytecode.py` | Signed bytecode serialization/verification/execution. |
+| `lexer.py` | Source tokenization |
+| `parser.py` | Recursive-descent parsing |
+| `ir.py` | Typed intermediate representation |
+| `interpreter.py` | Controlled execution |
+| `bytecode.py` | Compilation and verification |
 
 ### `jocky/collectors/`
 
-Each module provides a bounded evidence collector. `registry.py` is the explicit capability registry.
+Evidence acquisition.
+
+Current registered surfaces:
+
+```text
+system_info
+processes
+network_connections
+network_artifacts
+windows_event_logs
+sysmon_events
+services
+pe_metadata
+logged_in_users
+file_hash
+scheduled_tasks
+startup_items
+open_files
+local_users
+modules
+threads
+memory_regions
+```
 
 ### `jocky/analysis/`
 
-Each module provides evidence-driven rules. `registry.py` is the explicit rule registry.
+Evidence-driven analysis.
+
+Important modules:
+
+- `rules.py`
+- `rules_extended.py`
+- `network_hunting.py`
+- `windows_telemetry.py`
+- `injection_rules.py`
+- `pe_rules.py`
+- `finding.py`
+- `registry.py`
 
 ### `jocky/api/`
 
-FastAPI routes, authentication, catalog, remote-agent APIs, key management and report operations.
+FastAPI application.
+
+Includes:
+
+- authentication;
+- investigation routes;
+- asynchronous investigation jobs;
+- catalog;
+- bytecode endpoints;
+- agent endpoints;
+- key registration;
+- report download;
+- audit endpoints.
 
 ### `jocky/reports/`
 
-Structured report model, report builder, HTML renderer, JSON output and encryption.
+Report construction and export.
+
+Includes:
+
+- report model;
+- builder;
+- HTML writer;
+- JSON writer;
+- encryption;
+- integrity hashing.
 
 ### `jocky/storage/`
 
-SQLite schema, persistence, case metadata and dashboard aggregation.
+SQLite persistence and network evidence source handling.
 
 ### `jocky/agent/`
 
-Remote endpoint polling and job execution.
-
-## Frontend
-
-`frontend/src/` contains the React console.
-
-Important areas:
-
-- `pages/` — route-level views
-- `components/` — reusable UI components
-- `api/` — HTTP/token client helpers
-- `lib.js` — templates/catalog-related helpers
-- `index.css` — console design system
-
-Public branding assets live under `frontend/public/`.
+Remote endpoint execution agent.
 
 ---
 
-## Adding a new collector
+## Frontend
 
 ```text
-1. create collector module
-2. implement bounded read-only collection
-3. register collector
-4. add catalog description
-5. add evidence property if needed
-6. add tests
-7. update DFIR capability documentation
+frontend/src/
+├── components/
+├── pages/
+├── api/
+├── App.jsx
+├── hooks.js
+├── lib.js
+└── index.css
 ```
 
-## Adding a new analysis rule
+Current pages include:
 
-```text
-1. implement evidence → Finding rule
-2. register rule
-3. add catalog metadata
-4. add tests
-5. add interpretation documentation
+- Dashboard;
+- Investigations;
+- New Investigation;
+- Investigation Detail;
+- Search;
+- Agents;
+- Network Evidence;
+- Injection Analysis;
+- Windows Telemetry;
+- Bytecode;
+- Keys;
+- Sign In.
+
+---
+
+## Adding a collector
+
+1. create a module under `jocky/collectors/`;
+2. implement a bounded collector function;
+3. return a predictable dictionary schema;
+4. explicitly handle unsupported platforms;
+5. register the collector in `registry.py`;
+6. add catalog description;
+7. add tests;
+8. document the evidence schema.
+
+Example contract:
+
+```python
+def collect_example() -> dict:
+    return {
+        "supported": True,
+        "items": [],
+        "count": 0,
+        "truncated": False,
+    }
 ```
+
+---
+
+## Adding an analysis rule
+
+1. implement the rule in the appropriate analysis module;
+2. accept collected evidence;
+3. return `list[Finding]`;
+4. avoid side effects;
+5. register the rule;
+6. add catalog metadata;
+7. add evidence-reference mapping if the report builder needs it;
+8. add tests;
+9. document interpretation and false-positive considerations.
+
+---
 
 ## Adding a frontend capability
 
-The preferred approach is to consume the live `/api/catalog` instead of duplicating backend capability definitions in the UI.
+1. expose the data through an authenticated API route;
+2. update the API client;
+3. add the page/component;
+4. consume `/api/catalog` when listing capabilities;
+5. support loading/error/cancellation states;
+6. preserve existing investigation behavior.
+
+---
+
+## Architectural rules for contributors
+
+Do not introduce:
+
+- arbitrary command execution into JOCKY;
+- unrestricted file paths selected by scripts;
+- process-memory modification;
+- hidden collectors;
+- analysis rules with endpoint side effects;
+- unbounded collection loops;
+- secrets in source code;
+- capability names that are not registered.
+
+---
+
+## Verification
+
+The current repository regression baseline is:
+
+```text
+91 passed
+```
+
+Run:
+
+```bash
+pytest -q
+```

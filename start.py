@@ -1,5 +1,5 @@
 """
-JOCKY launcher - installs, configures and starts the whole stack.
+RANDAR launcher - installs, configures and starts the whole stack.
 
     python start.py              first run: set up everything, then start
     python start.py --dev        Vite dev server (hot reload) + API auto-reload
@@ -76,7 +76,7 @@ def write_env(updates: dict) -> None:
 
 def issue_token() -> None:
     token = secrets.token_urlsafe(32)
-    write_env({"JOCKY_API_TOKEN_HASH": hashlib.sha256(token.encode()).hexdigest()})
+    write_env({"RANDAR_API_TOKEN_HASH": hashlib.sha256(token.encode()).hexdigest(), "JOCKY_API_TOKEN_HASH": hashlib.sha256(token.encode()).hexdigest()})
     bar = "-" * 60
     print(f"\n  {bar}\n  YOUR API TOKEN (shown once - store it in a password manager)\n\n"
           f"    {_c('1', token)}\n\n  It is required to sign in to the console.\n  {bar}\n")
@@ -84,14 +84,14 @@ def issue_token() -> None:
 
 def ensure_config() -> None:
     env = read_env()
-    h = env.get("JOCKY_API_TOKEN_HASH", "")
+    h = env.get("RANDAR_API_TOKEN_HASH", env.get("JOCKY_API_TOKEN_HASH", ""))
     if len(h) != 64 or any(c not in "0123456789abcdefABCDEF" for c in h):
         note("No valid API token configured - generating one.")
         issue_token()
     else:
         ok("API token configured.")
-    if len(env.get("JOCKY_BYTECODE_KEY", "")) < 32:
-        write_env({"JOCKY_BYTECODE_KEY": secrets.token_urlsafe(48)})
+    if len(env.get("RANDAR_BYTECODE_KEY", env.get("JOCKY_BYTECODE_KEY", ""))) < 32:
+        write_env({"RANDAR_BYTECODE_KEY": secrets.token_urlsafe(48), "JOCKY_BYTECODE_KEY": secrets.token_urlsafe(48)})
         ok("Bytecode signing key generated.")
 
 
@@ -212,7 +212,7 @@ def wait_healthy(url: str, secs: int = 25) -> bool:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="JOCKY launcher")
+    ap = argparse.ArgumentParser(description="RANDAR launcher")
     ap.add_argument("--dev", action="store_true", help="hot-reload frontend and API")
     ap.add_argument("--new-token", action="store_true", help="issue a new API token and exit")
     ap.add_argument("--rebuild", action="store_true", help="force a frontend rebuild")
@@ -221,7 +221,7 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8000)
     a = ap.parse_args()
 
-    print(f"\n  {_c('1', 'JOCKY')}  forensic triage platform\n")
+    print(f"\n  {_c('1', 'RANDAR')}  forensic triage platform\n")
     if a.new_token:
         issue_token()
         return
@@ -252,7 +252,7 @@ def main() -> None:
             p.terminate()
         fail("The API did not start. Scroll up for the error.")
 
-    print(f"\n  {_c('92', 'JOCKY is running')}\n    Console   {open_url if have_ui else '(UI unavailable)'}\n"
+    print(f"\n  {_c('92', 'RANDAR is running')}\n    Console   {open_url if have_ui else '(UI unavailable)'}\n"
           f"    API docs  {api_url}/docs\n\n  Press Ctrl+C to stop.\n")
     if have_ui and not a.no_browser:
         webbrowser.open(open_url)

@@ -1,82 +1,97 @@
-# JOCKY Product Guide
+# RANDAR Product Guide
 
 ## 1. Executive overview
 
-JOCKY is a **Forensics-as-Code** platform. Its central idea is simple: an investigation should be expressible as a small, readable program whose execution can be validated, reproduced, inspected, secured, stored, and reported.
+RANDAR is a **Forensics-as-Code platform** for computer and network forensic triage.
 
-Instead of asking an analyst to remember a collection of commands for processes, network sockets, persistence, users, files, DLLs, threads, and memory metadata, JOCKY provides a single investigation language and a controlled execution engine.
+The product combines:
 
-A JOCKY investigation has five conceptual stages:
+1. JOCKY, a constrained investigation language;
+2. a validation and execution engine;
+3. 17 registered evidence collectors;
+4. 40 registered analysis rules;
+5. a SQLite-backed case layer;
+6. evidence/report integrity metadata;
+7. protected report export;
+8. a remote-agent architecture;
+9. a React/Vite forensic console.
 
-```text
-DESCRIBE → COLLECT → CORRELATE → EXPLAIN → REPORT
-```
+The central design idea is simple:
 
-The source script is the investigation plan. Collectors produce endpoint evidence. Analysis rules correlate evidence into observations. The case layer preserves the result. Reporting turns the case into an analyst-readable artifact.
-
----
-
-## 2. The problem JOCKY addresses
-
-The SIH 2026 problem statement supplied for this project is:
-
-> **Creation of scripts/functions with new programming language to commence Computer & Network forensic analysis without triggering security solutions**
-
-The engineering interpretation adopted by JOCKY is **controlled, low-impact forensic acquisition and analysis**.
-
-JOCKY does not interpret this requirement as permission to bypass or disable security products. Instead, it minimizes endpoint modification by using read-only collectors, bounded operations, explicit capability allowlists, and a DSL that cannot execute arbitrary operating-system commands.
-
-This distinction matters because a forensic platform should preserve evidence and maintain a predictable execution boundary.
+> **The investigation itself becomes a reusable technical artifact.**
 
 ---
 
-## 3. What makes JOCKY different
-
-### 3.1 The investigation is executable documentation
-
-A JOCKY script describes exactly what the analyst intended to collect and analyze.
-
-That gives a case a natural provenance chain:
+## 2. The investigation lifecycle
 
 ```text
-Investigation name
-      ↓
-Source script
-      ↓
-SHA-256 script hash
-      ↓
-Parsed IR
-      ↓
-Collectors + rules
-      ↓
-Evidence
-      ↓
-Findings
-      ↓
+Define
+  ↓
+Validate
+  ↓
+Inspect
+  ↓
+Execute
+  ↓
+Collect
+  ↓
+Analyze
+  ↓
+Correlate
+  ↓
+Persist
+  ↓
 Report
 ```
 
+An analyst can therefore move from an investigation idea to a repeatable workflow without writing unrestricted operating-system commands.
+
+---
+
+## 3. What makes RANDAR different
+
+### 3.1 The investigation is executable documentation
+
+A JOCKY script communicates intent:
+
+```text
+collect processes;
+collect network_connections;
+analyze process_network_correlation;
+report "endpoint_network_review";
+```
+
+The script can be reviewed before execution and stored with the resulting case.
+
 ### 3.2 Capabilities are allowlisted
 
-The interpreter does not dynamically discover Python functions from a script. Collector and rule names are resolved against explicit registries.
+The engine resolves collectors and analysis rules from explicit registries.
 
-Adding capability therefore requires an intentional code change and registry entry.
+This gives the platform a strong capability boundary:
 
-### 3.3 Collection is separate from analysis
+```text
+JOCKY identifier
+      │
+      ▼
+registry lookup
+      │
+   ┌──┴──┐
+ known  unknown
+   │       │
+ execute  reject
+```
 
-A collector should answer:
+### 3.3 Collection and analysis are separated
 
-> “What did the endpoint report?”
+Collectors produce evidence.
 
-A rule should answer:
+Analysis rules consume evidence.
 
-> “What pattern in that evidence deserves attention?”
+This separation makes rules easier to test and prevents the analysis layer from becoming an unrestricted endpoint-access layer.
 
-Keeping those responsibilities separate makes the system easier to test and reduces accidental coupling.
+### 3.4 Local and remote execution share the same model
 
-### 3.4 The platform supports local and remote execution
-
-The same investigation language can be executed locally or through a JOCKY endpoint agent. The agent does not introduce a separate execution language; it uses the same lexer/parser/interpreter pipeline.
+Remote jobs dispatch a JOCKY investigation to an authorized agent. The agent uses the same collector/analysis architecture rather than exposing a separate shell.
 
 ---
 
@@ -84,140 +99,139 @@ The same investigation language can be executed locally or through a JOCKY endpo
 
 ### Step 1 — Script submission
 
-The console sends the script to the API.
+The API receives a JOCKY script.
 
 ### Step 2 — Lexing
 
-The lexer converts the source text into tokens. Invalid characters or malformed lexical constructs stop execution before collection begins.
+The lexer converts source text into bounded tokens and rejects unsupported syntax.
 
 ### Step 3 — Parsing
 
-The recursive-descent parser verifies the grammar and creates an IR representation.
+The recursive-descent parser converts tokens into a typed intermediate representation.
 
-### Step 4 — Interpreter execution
+### Step 4 — Validation
 
-The interpreter walks the IR. `collect` commands resolve through the collector registry. `analyze` commands resolve through the rule registry.
+Collector names, rule names, evidence properties, variables, conditions and language limits are checked.
 
-### Step 5 — Evidence collection
+### Step 5 — Interpreter execution
 
-Each collector returns a bounded structured result. Collector failures are represented explicitly so one failed data source does not automatically discard the rest of the investigation.
+Commands execute sequentially with runtime, collector and cancellation controls.
 
-### Step 6 — Analysis
+### Step 6 — Evidence collection
 
-Rules consume the accumulated evidence and produce `Finding` objects.
+Registered collectors query their defined evidence surface.
 
-A finding contains:
+### Step 7 — Analysis
 
-- rule name
-- severity
-- summary
-- reason
-- related evidence
+Registered rules consume collected evidence and emit findings.
 
-### Step 7 — Report construction
+### Step 8 — Report construction
 
-The result is assembled into a structured report. The source script is fingerprinted with SHA-256.
+The report builder assigns deterministic finding IDs, evidence references, collector hashes, timeline entries and execution metadata.
 
-### Step 8 — Persistence
+### Step 9 — Persistence
 
-The complete report is stored in SQLite. Analyst-editable metadata such as case name, status, and notes is stored separately.
+The case and report are stored in SQLite.
 
-### Step 9 — Presentation/export
+### Step 10 — Presentation/export
 
-The case becomes available in the console and can be exported as HTML or encrypted report data.
+The console displays the investigation, while JSON/HTML/encrypted exports provide external artifacts.
 
 ---
 
-## 5. What the Windows injection feature actually means
+## 5. Windows advanced forensics
 
-The Windows injection module is a **forensic detection/correlation capability**, not an injection framework.
-
-It combines three read-only evidence sources:
-
-### Modules
-
-Provides loaded module metadata for processes, including path and bounded SHA-256 hashing of modules in user-writable locations.
-
-### Threads
-
-Provides process-thread metadata and, on Windows, attempts to obtain thread start-address information using read-only operating-system APIs.
-
-### Memory regions
-
-Enumerates virtual-memory region metadata through `VirtualQueryEx`. It does not read arbitrary process-memory contents.
-
-The analysis layer then looks for combinations such as:
+The Windows-specific layer combines:
 
 ```text
-User-writable DLL
-      +
-Unexpected module location
-      +
-Private executable memory
-      +
-Thread start inside private executable memory
-      ↓
-Investigation indicator
+Modules ─────┐
+Threads ─────┼──► Injection correlation
+Memory ──────┤
+PE metadata ─┘
 ```
 
-These patterns can have legitimate causes. Browsers, JIT runtimes, security software, debuggers, and other complex applications can create executable private memory. Therefore JOCKY reports them as leads for investigation rather than declaring a process malicious.
+The implementation is metadata-oriented.
+
+It can identify review leads involving:
+
+- user-writable module locations;
+- DLL path anomalies;
+- private executable memory;
+- thread start addresses;
+- PE imports;
+- high entropy;
+- signature metadata;
+- module/disk hash mismatch;
+- writable/executable PE characteristics.
+
+It does not modify the target process.
 
 ---
 
-## 6. Why bounded collection matters
+## 6. Network investigation
 
-Forensic tools can accidentally become denial-of-service tools if they enumerate unlimited processes, threads, memory regions, or files.
+RANDAR can analyze normalized network evidence for:
 
-JOCKY therefore applies explicit limits in sensitive collectors. For example, the Windows telemetry layer bounds the number of processes, threads, modules, and memory regions considered.
+- DNS anomalies;
+- entropy;
+- rare domains;
+- suspicious TLD patterns;
+- DNS bursts;
+- unusual query types;
+- long/random labels;
+- DNS tunnelling indicators;
+- DNS beaconing;
+- network beaconing;
+- port scans;
+- horizontal scans;
+- service discovery;
+- UDP scan indicators;
+- address classification;
+- process/network correlation.
 
-The objective is predictable resource usage and graceful degradation, not maximum possible enumeration at any cost.
-
----
-
-## 7. What JOCKY is capable of today
-
-JOCKY can currently perform:
-
-- Host/system triage
-- Process inventory
-- Process/network correlation
-- Network socket inventory
-- Logged-in user/session inventory
-- Local account inventory
-- Scheduled-task/cron inspection
-- Startup/persistence inspection
-- Bounded open-file inspection
-- Controlled file hashing
-- Windows loaded-module inspection
-- Windows thread metadata inspection
-- Windows virtual-memory metadata inspection
-- Injection-related correlation
-- Script validation
-- IR inspection
-- Signed bytecode compilation and verification
-- Local investigation persistence
-- Remote-agent job dispatch
-- HTML reporting
-- Encrypted report export
+Network evidence is bounded and normalized. RANDAR should not be represented as a full replacement for dedicated packet-analysis platforms.
 
 ---
 
-## 8. What JOCKY deliberately does not do
+## 7. Reporting model
 
-JOCKY does not currently provide:
+A report has four major layers:
 
-- arbitrary shell execution from the DSL
-- arbitrary PowerShell execution from the DSL
-- process-memory writing
-- DLL injection
-- remote-thread creation for injection
-- thread suspension/hijacking as an action
-- EDR/AV disabling
-- security-control bypassing
-- full memory-dump acquisition
-- a claim of automatic malware attribution
+```text
+Case metadata
+     +
+Execution metadata
+     +
+Evidence
+     +
+Findings
+```
 
-These boundaries are part of the security architecture, not missing documentation.
+Findings additionally carry:
+
+- severity;
+- summary;
+- reason;
+- related evidence;
+- evidence references;
+- limitations;
+- next-check guidance.
+
+---
+
+## 8. Analyst workflow
+
+A recommended workflow is:
+
+1. define the investigation;
+2. validate it;
+3. inspect the IR;
+4. execute against an authorized endpoint/evidence set;
+5. review collector coverage and truncation;
+6. review findings;
+7. pivot into supporting evidence;
+8. verify report integrity;
+9. export/share the appropriate report artifact.
 
 ---
 
@@ -225,33 +239,30 @@ These boundaries are part of the security architecture, not missing documentatio
 
 ### DFIR analysts
 
-Write repeatable triage investigations and review evidence in one console.
+For repeatable triage and evidence-driven investigation workflows.
 
 ### Security engineers
 
-Add new collectors and analysis rules through explicit modules and registries.
+For controlled endpoint telemetry and analysis prototyping.
 
-### Researchers/students
+### Researchers and students
 
-Study how a small language can orchestrate forensic acquisition safely.
+For understanding the relationship between a domain-specific language, execution engine and forensic evidence.
 
-### SOC/IR teams
+### SIH evaluators
 
-Use a shared investigation definition instead of manually reproducing a long list of endpoint commands.
-
-### Evaluators/judges
-
-Observe the complete path from source language to endpoint evidence to analysis to protected report.
+For assessing whether the project demonstrates a coherent implementation rather than only a presentation concept.
 
 ---
 
-## 10. Mental model for a new developer
+## 10. Product boundaries
 
-If you are new to the project, remember four rules:
+RANDAR intentionally does not promise:
 
-1. **Collectors gather facts.**
-2. **Rules interpret facts.**
-3. **The DSL chooses which registered capabilities run.**
-4. **The report preserves what happened.**
+- definitive malware classification;
+- arbitrary memory acquisition;
+- unrestricted command execution;
+- complete enterprise-scale case management;
+- certified chain-of-custody acquisition.
 
-That mental model explains most of the repository.
+The platform's strength is the controlled investigation workflow and the architecture around it.

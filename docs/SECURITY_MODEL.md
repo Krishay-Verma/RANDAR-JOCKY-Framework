@@ -1,206 +1,272 @@
-# JOCKY Security Model
+# RANDAR Security Model
 
 ## 1. Security objective
 
-JOCKY is designed to make forensic investigations **controlled, auditable, bounded and low-impact**.
+RANDAR's security model is designed around:
 
-It is not designed to defeat endpoint security products.
+1. controlled forensic execution;
+2. reduced endpoint modification;
+3. explicit capability boundaries;
+4. authenticated API access;
+5. tamper-evident bytecode;
+6. protected report transfer;
+7. evidence/report integrity metadata.
 
-The phrase “without triggering security solutions” in the SIH problem statement is therefore addressed through minimizing invasive endpoint actions and using explicit forensic capabilities, not by disabling or evading security controls.
+RANDAR is not designed to evade or disable security controls.
 
 ---
 
 ## 2. Trust boundaries
 
 ```text
-                    Analyst Browser
-                          │
-                   Bearer token
-                          │
-                          ▼
-                    JOCKY API
-                    /         \
-                   /           \
-            local engine      agent API
-                 │                 │
-                 ▼                 ▼
-             endpoint         remote endpoint
+Analyst
+   │
+   │ bearer token
+   ▼
+FastAPI
+   │
+   ├── JOCKY validation
+   │
+   ├── capability registries
+   │
+   ├── interpreter
+   │
+   └── report/storage
+            │
+            ▼
+      endpoint evidence
 ```
 
-Important boundaries:
-
-- Browser ↔ API
-- API ↔ local execution engine
-- API ↔ remote agent
-- DSL ↔ registered capabilities
-- Report encryption ↔ investigator private key
+The key security boundary is the transition from a JOCKY identifier to a registered implementation.
 
 ---
 
 ## 3. DSL isolation
 
-The JOCKY DSL cannot directly execute arbitrary Python or operating-system commands.
+JOCKY cannot directly invoke:
 
-Capability resolution is registry-based:
+- Python;
+- shell commands;
+- PowerShell;
+- arbitrary Windows APIs;
+- arbitrary executables;
+- arbitrary process manipulation.
 
-```text
-collect X
-   │
-   ▼
-collector registry
-   │
-   ├── known → execute registered function
-   └── unknown → reject
-```
-
-The same pattern applies to analysis rules.
-
-This provides a strong and easy-to-audit extension boundary.
+A script can only reference registered collectors/rules and bounded language constructs.
 
 ---
 
 ## 4. Authentication
 
-Protected API routes require a bearer token.
+The API uses a bearer token.
 
-The token is hashed server-side rather than stored as plaintext configuration.
+Only the token's SHA-256 digest is stored in configuration.
 
-The frontend stores the active token in `sessionStorage`, so normal browser session termination removes it.
+Verification uses:
 
-`/api/health` is intentionally public and returns only a liveness response.
+```text
+provided token
+     ↓
+SHA-256
+     ↓
+constant-time comparison
+     ↓
+allow / deny
+```
+
+Server startup validates that authentication is configured before binding.
+
+For production multi-user environments, this should evolve to a proper identity and authorization model.
 
 ---
 
 ## 5. Remote-agent authentication
 
-Agents use per-agent tokens.
+Agents receive per-agent tokens.
 
-The server stores token digests and uses constant-time comparison for authentication.
+The server stores the token digest, not the plaintext.
 
-Agents are restricted to their own job endpoints.
+Agents can be:
 
-The agent does not receive a privileged arbitrary-command channel; it executes JOCKY scripts through the same language pipeline.
+- registered;
+- monitored through heartbeat;
+- revoked.
 
-TLS verification is enabled by default.
+Jobs use:
 
-Disabling TLS verification is explicitly treated as a development/test-only operation.
+- nonce;
+- expiry;
+- per-agent job identity;
+- HMAC-derived job signature.
+
+The current agent architecture is designed for controlled deployments rather than untrusted Internet exposure.
 
 ---
 
 ## 6. Signed bytecode
 
-JOCKY bytecode uses HMAC-SHA256 with a local signing key.
+JOCKY bytecode is signed using HMAC-SHA256.
 
-Before execution:
+The signing key:
 
-1. signature is verified;
-2. wire-format/header checks are performed;
-3. the representation is reconstructed into IR;
-4. the ordinary interpreter executes it.
+- is supplied at runtime;
+- is not embedded in the bytecode;
+- has a minimum configured length;
+- is required for verification.
 
-The bytecode path therefore inherits the source-language capability boundary.
+Verification checks the signature before parsing/executing the body.
+
+This provides integrity against unauthorized modification by parties that do not possess the signing key.
+
+It does **not** establish authorship or public verifiability by itself; HMAC is a shared-secret mechanism.
 
 ---
 
 ## 7. Report encryption
 
-Reports use hybrid encryption:
+The current implementation uses:
 
-```text
-Report
-  │
-  ▼
-AES-256-GCM encryption
-  │
-  └── fresh AES key + nonce
-              │
-              ▼
-       RSA-OAEP wrapping
-       with public key
-```
+- AES-256-GCM for report encryption;
+- RSA public-key wrapping;
+- OAEP with SHA-256;
+- minimum 2048-bit RSA key size.
 
-The investigator's private key is not required by the server.
+The report is authenticated by GCM.
 
-The public key registration is held in memory for the current server session.
+The investigator private key is not stored by the server.
+
+The current prototype stores the active public key only in process memory.
 
 ---
 
-## 8. Evidence persistence
+## 8. Evidence persistence and integrity
 
-The stored report JSON is treated as immutable evidence output.
+Each successful collector result can receive an SHA-256 evidence digest.
 
-Case metadata is stored separately so changing a case title, status or notes does not rewrite the evidence document.
+The report receives a SHA-256 report digest.
 
-This is a logical immutability model; production deployments should additionally protect the database file with OS permissions, backups, and access controls appropriate to the environment.
+The report builder also assigns deterministic finding IDs based on rule, summary, evidence and index.
+
+This gives investigators several integrity anchors:
+
+```text
+source script
+     ↓ SHA-256
+script identity
+
+collector evidence
+     ↓ SHA-256
+evidence identity
+
+final report
+     ↓ SHA-256
+report identity
+```
+
+These mechanisms support integrity verification but do not constitute a certified legal chain of custody.
 
 ---
 
 ## 9. Endpoint safety model
 
-Collectors should be read-only and bounded.
+### Read-only design
 
-The Windows injection collectors specifically:
+The advanced Windows collectors do not:
 
-- do not inject DLLs;
-- do not create remote threads;
-- do not suspend threads;
-- do not write process memory;
-- do not read arbitrary process-memory contents;
-- do not disable AV/EDR;
-- do not modify security configuration.
+- write process memory;
+- suspend/resume threads;
+- inject DLLs;
+- create remote threads;
+- execute collected PE files.
+
+### Bounded design
+
+Collectors use explicit limits for:
+
+- process counts;
+- thread counts;
+- memory regions;
+- module counts;
+- PE files;
+- imports/exports;
+- event records;
+- network evidence;
+- collector runtime.
+
+### Unsupported platforms
+
+Windows-only collectors return explicit unsupported status on non-Windows systems.
+
+They do not silently emulate Windows behavior.
 
 ---
 
-## 10. Report and finding language
+## 10. Report language
 
-JOCKY deliberately uses language such as:
+Findings are intentionally written as indicators.
 
-- indicator
-- review recommended
-- anomaly
-- lead
-- correlation
+Example:
 
-rather than automatically asserting:
+```text
+Observed:
+private executable memory + thread correlation
 
-- malware
-- attacker
-- compromise
+Not asserted:
+"malware has been confirmed"
+```
 
-This is important because forensic evidence often requires contextual validation.
+This distinction is a security and forensic-quality feature.
 
 ---
 
 ## 11. Deployment recommendations
 
-For any environment beyond a local laboratory:
+For a controlled deployment:
 
-- bind the API behind an authenticated TLS reverse proxy;
-- restrict network exposure;
-- protect `.env` and signing keys;
-- protect the SQLite database with OS permissions;
-- use dedicated service accounts where appropriate;
-- rotate API/agent credentials according to organizational policy;
-- back up investigations securely;
-- avoid disabling TLS verification;
-- test collectors on representative endpoints before broad deployment.
+- bind locally unless remote access is required;
+- place remote deployments behind TLS;
+- protect `.env`;
+- rotate API tokens when needed;
+- protect bytecode signing keys;
+- use a dedicated investigator key pair;
+- restrict endpoint privileges to the minimum required;
+- maintain controlled Windows test hosts;
+- back up the SQLite case database;
+- avoid exposing the prototype directly to the public Internet.
 
 ---
 
 ## 12. Security review checklist
 
-Before a production-style deployment, review:
+Before a release:
 
-- authentication and authorization
-- reverse-proxy/TLS configuration
-- database file permissions
-- secret storage
-- agent token lifecycle
-- job replay/expiry requirements
-- input-size limits
-- API rate limiting
-- audit logging
-- report retention
-- endpoint privilege requirements
-- collector resource bounds
-- supply-chain pinning for dependencies
+- [ ] All new collectors are registered explicitly.
+- [ ] All new rules are registered explicitly.
+- [ ] No new arbitrary command execution path exists.
+- [ ] Windows telemetry remains read-only.
+- [ ] Runtime bounds are preserved.
+- [ ] Bytecode verification occurs before execution.
+- [ ] API routes requiring authentication remain protected.
+- [ ] Secrets are not logged.
+- [ ] Report integrity remains deterministic.
+- [ ] Unsupported-platform behavior is explicit.
+- [ ] Regression tests cover the new boundary.
+
+---
+
+## 13. Prototype-to-production gaps
+
+The following are recognized production hardening areas:
+
+- centralized identity and RBAC;
+- external key management;
+- durable distributed job queue;
+- stronger agent transport identity;
+- immutable/WORM evidence storage;
+- multi-operator case isolation;
+- centralized telemetry retention;
+- deployment signing and packaging;
+- formal threat modeling;
+- external security assessment.
+
+These are engineering hardening directions, not claims about current functionality.

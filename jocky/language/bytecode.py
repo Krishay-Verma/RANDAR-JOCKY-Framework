@@ -50,7 +50,7 @@ from typing import Any
 from jocky.language.ir import (
     AnalyzeCommand, CollectCommand, IfCommand,
     Investigation, LetCommand, LiteralExpr,
-    PropertyExpr, ReportCommand, VarExpr,
+    PropertyExpr, ReportCommand, VarExpr, UserRuleCommand,
 )
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -64,6 +64,9 @@ _ENV_KEY     = "JOCKY_BYTECODE_KEY"
 
 # A key shorter than this is too easy to guess or brute-force.
 _MIN_KEY_LENGTH = 32
+_MAX_OPCODES = 2000
+_MAX_NAME_LENGTH = 200
+_VALID_OPERATORS = {">", "<", ">=", "<=", "==", "!="}
 
 
 def _get_signing_key() -> bytes:
@@ -89,6 +92,10 @@ def compile_investigation(investigation: Investigation) -> bytes:
     Returns the raw bytecode blob.
     """
     opcodes = _flatten_commands(investigation.commands)
+    if len(opcodes) > _MAX_OPCODES:
+        raise BytecodeError(
+            f"Investigation produces too many bytecode operations (max {_MAX_OPCODES})."
+        )
 
     header = {
         "magic":         MAGIC,
@@ -123,7 +130,10 @@ def _flatten_commands(commands: list, depth: int = 0) -> list[dict]:
             opcodes.append({"op": "COLLECT", "target": cmd.target, "line": cmd.line})
 
         elif isinstance(cmd, AnalyzeCommand):
-            opcodes.append({"op": "ANALYZE", "rule": cmd.rule, "line": cmd.line})
+            opcodes.append({"op": "ANALYZE", "rule": cmd.rule, "where": _serialise_condition(cmd.where) if cmd.where else None, "line": cmd.line})
+
+        elif isinstance(cmd, UserRuleCommand):
+            opcodes.append({"op": "USER_RULE", "name": cmd.name, "condition": _serialise_condition(cmd.condition), "severity": cmd.severity, "line": cmd.line})
 
         elif isinstance(cmd, ReportCommand):
             opcodes.append({"op": "REPORT", "name": cmd.name, "line": cmd.line})
@@ -165,11 +175,9 @@ def _serialise_expr(expr) -> dict:
 
 
 def _serialise_condition(cond) -> dict:
-    return {
-        "left":     _serialise_expr(cond.left),
-        "operator": cond.operator,
-        "right":    _serialise_expr(cond.right),
-    }
+    if cond.kind != "comparison":
+        return {"kind": cond.kind, "children": [_serialise_condition(c) for c in cond.children]}
+    return {"kind": "comparison", "left": _serialise_expr(cond.left), "operator": cond.operator, "right": _serialise_expr(cond.right)}
 
 
 # ── Verification and loading ───────────────────────────────────────────────────
@@ -204,11 +212,21 @@ def verify_and_load(blob: bytes) -> tuple[dict, list[dict]]:
 
         offset = 0
 
-        # Parse header.
+        # Parse header with strict length bounds before slicing.
+        if len(payload) < offset + 4:
+            raise BytecodeError("Missing bytecode header length.")
         (header_len,) = struct.unpack_from(_HEADER_FMT, payload, offset)
         offset += 4
+        if header_len <= 0 or header_len > len(payload) - offset:
+            raise BytecodeError("Invalid bytecode header length.")
         header = json.loads(payload[offset: offset + header_len])
         offset += header_len
+        if not isinstance(header, dict):
+            raise BytecodeError("Bytecode header must be an object.")
+        if not isinstance(header.get("name"), str) or not header["name"].strip():
+            raise BytecodeError("Bytecode investigation name is invalid.")
+        if not isinstance(header.get("command_count"), int) or header["command_count"] < 0:
+            raise BytecodeError("Bytecode command count is invalid.")
 
         # Validate header fields.
         if header.get("magic") != MAGIC:
@@ -222,11 +240,25 @@ def verify_and_load(blob: bytes) -> tuple[dict, list[dict]]:
                 f"Expected {VERSION}."
             )
 
-        # Parse body.
+        # Parse body with strict length bounds.
+        if len(payload) < offset + 4:
+            raise BytecodeError("Missing bytecode body length.")
         (body_len,) = struct.unpack_from(_HEADER_FMT, payload, offset)
         offset += 4
-        opcodes = json.loads(payload[offset: offset + body_len])
+        if body_len <= 0 and header["command_count"] != 0:
+            raise BytecodeError("Bytecode body length is inconsistent.")
+        if body_len > len(payload) - offset:
+            raise BytecodeError("Invalid bytecode body length.")
+        body_end = offset + body_len
+        opcodes = json.loads(payload[offset:body_end])
+        if not isinstance(opcodes, list):
+            raise BytecodeError("Bytecode body must be an opcode list.")
+        if len(opcodes) != header["command_count"]:
+            raise BytecodeError("Bytecode command count does not match body.")
+        if body_end != len(payload):
+            raise BytecodeError("Unexpected trailing data in bytecode payload.")
 
+        _validate_opcodes(opcodes)
         return header, opcodes
 
     except BytecodeError:
@@ -234,6 +266,119 @@ def verify_and_load(blob: bytes) -> tuple[dict, list[dict]]:
     except Exception as exc:
         raise BytecodeError(f"Bytecode parse failed: {exc}") from exc
 
+
+
+
+def _validate_opcodes(opcodes: list[dict]) -> None:
+    """Validate signed opcode structure and JOCKY capability boundaries."""
+    if len(opcodes) > _MAX_OPCODES:
+        raise BytecodeError(f"Bytecode contains too many operations (max {_MAX_OPCODES}).")
+
+    from jocky.collectors.registry import is_known_collector
+    from jocky.analysis.registry import is_known_rule
+    from jocky.language.interpreter import list_evidence_properties
+
+    valid_ops = {"COLLECT", "ANALYZE", "REPORT", "LET", "IF", "USER_RULE"}
+    allowed_properties = set(list_evidence_properties())
+    valid_operators = _VALID_OPERATORS
+    variable_names = set()
+
+    for index, op in enumerate(opcodes):
+        if not isinstance(op, dict):
+            raise BytecodeError(f"Opcode {index} is not an object.")
+        kind = op.get("op")
+        if kind not in valid_ops:
+            raise BytecodeError(f"Opcode {index} has unknown operation {kind!r}.")
+        if not isinstance(op.get("line", 0), int) or op.get("line", 0) < 0:
+            raise BytecodeError(f"Opcode {index} has an invalid source line.")
+        if kind in {"COLLECT", "ANALYZE", "REPORT"}:
+            field = {"COLLECT": "target", "ANALYZE": "rule", "REPORT": "name"}[kind]
+            value = op.get(field)
+            if not isinstance(value, str) or not value or len(value) > _MAX_NAME_LENGTH:
+                raise BytecodeError(f"Opcode {index} has an invalid {field}.")
+            if kind == "COLLECT" and not is_known_collector(value):
+                raise BytecodeError(f"Opcode {index} references an unknown collector.")
+            if kind == "ANALYZE" and not is_known_rule(value):
+                raise BytecodeError(f"Opcode {index} references an unknown analysis rule.")
+            if kind == "ANALYZE" and op.get("where") is not None:
+                _validate_condition(op["where"], index, allowed_properties, variable_names, finding_mode=True)
+        elif kind == "LET":
+            name = op.get("name")
+            if not isinstance(name, str) or not name or len(name) > 100:
+                raise BytecodeError(f"Opcode {index} has an invalid variable name.")
+            import re
+            if not re.fullmatch(r"[a-z_][a-z0-9_]*", name):
+                raise BytecodeError(f"Opcode {index} has an invalid variable name.")
+            variable_names.add(name)
+            _validate_expr(op.get("value"), index, allowed_properties, variable_names)
+        elif kind == "USER_RULE":
+            name = op.get("name"); severity = op.get("severity")
+            if not isinstance(name, str) or not name or len(name) > _MAX_NAME_LENGTH:
+                raise BytecodeError(f"Opcode {index} has an invalid user-rule name.")
+            if severity not in {"informational", "review_recommended", "medium", "high", "critical"}:
+                raise BytecodeError(f"Opcode {index} has an invalid user-rule severity.")
+            _validate_condition(op.get("condition"), index, allowed_properties, variable_names, finding_mode=True)
+        elif kind == "IF":
+            condition = op.get("condition")
+            if not isinstance(condition, dict):
+                raise BytecodeError(f"Opcode {index} has an invalid condition.")
+            _validate_condition(condition, index, allowed_properties, variable_names)
+            tc, ec = condition.get("then_count"), condition.get("else_count")
+            # branch counts are stored on the opcode, not condition; retain below
+            tc, ec = op.get("then_count"), op.get("else_count")
+            if not isinstance(tc, int) or not isinstance(ec, int) or tc < 0 or ec < 0:
+                raise BytecodeError(f"Opcode {index} has invalid branch counts.")
+            if tc + ec > len(opcodes) - index - 1:
+                raise BytecodeError(f"IF opcode {index} exceeds opcode body.")
+
+    for index, op in enumerate(opcodes):
+        if op.get("op") == "IF":
+            end = index + 1 + op["then_count"] + op["else_count"]
+            if end > len(opcodes):
+                raise BytecodeError(f"IF opcode {index} exceeds opcode body.")
+
+
+def _validate_condition(condition: object, index: int, allowed_properties: set[str], variable_names: set[str], finding_mode: bool = False) -> None:
+    if not isinstance(condition, dict): raise BytecodeError(f"Opcode {index} has an invalid condition.")
+    kind = condition.get("kind", "comparison")
+    if kind in {"and", "or", "not"}:
+        children = condition.get("children")
+        if not isinstance(children, list) or not children or len(children) > 20:
+            raise BytecodeError(f"Opcode {index} has invalid boolean condition children.")
+        for child in children: _validate_condition(child, index, allowed_properties, variable_names, finding_mode)
+        return
+    if kind != "comparison": raise BytecodeError(f"Opcode {index} has unknown condition kind.")
+    operator = condition.get("operator")
+    if operator not in _VALID_OPERATORS: raise BytecodeError(f"Opcode {index} has an invalid comparison operator.")
+    _validate_expr(condition.get("left"), index, allowed_properties, variable_names, finding_mode)
+    _validate_expr(condition.get("right"), index, allowed_properties, variable_names, finding_mode)
+
+def _validate_expr(expr: object, index: int, allowed_properties: set[str], variable_names: set[str], finding_mode: bool = False) -> None:
+    if not isinstance(expr, dict):
+        raise BytecodeError(f"Opcode {index} has an invalid expression.")
+    kind = expr.get("kind")
+    if kind == "literal":
+        value = expr.get("value")
+        if not isinstance(value, (str, int, bool)) or isinstance(value, float):
+            raise BytecodeError(f"Opcode {index} has an invalid literal.")
+        return
+    if kind == "var":
+        name = expr.get("name")
+        if not isinstance(name, str) or name not in variable_names:
+            raise BytecodeError(f"Opcode {index} references an undefined variable.")
+        return
+    if kind == "property":
+        collector = expr.get("collector")
+        prop = expr.get("property")
+        if not isinstance(collector, str) or not isinstance(prop, str):
+            raise BytecodeError(f"Opcode {index} has an invalid evidence property.")
+        allowed_finding = {"process.name", "process.pid", "destination.address", "destination.ip", "destination.port", "destination.is_external", "source.address", "source.ip", "source.port", "module.name", "module.path", "evidence.source_rule"}
+        if finding_mode:
+            if f"{collector}.{prop}" not in allowed_finding: raise BytecodeError(f"Opcode {index} references an unapproved finding property.")
+        elif f"{collector}.{prop}" not in allowed_properties:
+            raise BytecodeError(f"Opcode {index} references an unapproved evidence property.")
+        return
+    raise BytecodeError(f"Opcode {index} has an unknown expression kind.")
 
 # ── Signing ────────────────────────────────────────────────────────────────────
 

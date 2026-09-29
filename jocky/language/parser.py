@@ -36,7 +36,7 @@ from jocky.language.lexer import Token, TokenType
 from jocky.language.ir import (
     Investigation,
     CollectCommand, AnalyzeCommand, ReportCommand,
-    LetCommand, IfCommand,
+    LetCommand, IfCommand, UserRuleCommand,
     LiteralExpr, VarExpr, PropertyExpr,
     Condition,
     Command, Expr,
@@ -124,12 +124,14 @@ class Parser:
             return self._parse_let()
         if tok.type == TokenType.IF:
             return self._parse_if()
+        if tok.type == TokenType.RULE:
+            return self._parse_rule()
 
         # IDENT-based keywords.
         if tok.type != TokenType.IDENT or tok.value not in _STATEMENT_KEYWORDS:
             raise ParseError(
                 f"Line {tok.line}: expected statement keyword "
-                f"('collect', 'analyze', 'report', 'let', 'if'), "
+                f"('collect', 'analyze', 'report', 'let', 'if', 'rule'), "
                 f"got {tok.value!r}"
             )
 
@@ -142,8 +144,12 @@ class Parser:
 
         if keyword == "analyze":
             arg = self._expect(TokenType.IDENT, "rule name")
+            condition = None
+            if self._current().type == TokenType.WHERE:
+                self._advance()
+                condition = self._parse_boolean_condition()
             self._expect(TokenType.SEMICOLON, "';'")
-            return AnalyzeCommand(rule=arg.value, line=arg.line)
+            return AnalyzeCommand(rule=arg.value, line=arg.line, where=condition)
 
         # keyword == "report"
         arg = self._expect(TokenType.STRING, "report name (string)")
@@ -202,22 +208,54 @@ class Parser:
             line=line,
         )
 
-    # ── Condition ──────────────────────────────────────────────────────────────
+    # ── Conditions / boolean logic ─────────────────────────────────────────────
 
     def _parse_condition(self) -> Condition:
+        return self._parse_boolean_condition()
+
+    def _parse_boolean_condition(self) -> Condition:
+        return self._parse_or_condition()
+
+    def _parse_or_condition(self) -> Condition:
+        node = self._parse_and_condition()
+        children = [node]
+        while self._current().type == TokenType.OR:
+            self._advance(); children.append(self._parse_and_condition())
+        return children[0] if len(children) == 1 else Condition(kind="or", children=children)
+
+    def _parse_and_condition(self) -> Condition:
+        node = self._parse_not_condition()
+        children = [node]
+        while self._current().type == TokenType.AND:
+            self._advance(); children.append(self._parse_not_condition())
+        return children[0] if len(children) == 1 else Condition(kind="and", children=children)
+
+    def _parse_not_condition(self) -> Condition:
+        if self._current().type == TokenType.NOT:
+            line = self._current().line; self._advance()
+            return Condition(kind="not", children=[self._parse_not_condition()])
         left = self._parse_expr()
-
-        op_tok = self._current()
-        if op_tok.type not in _COMPARISON_TYPES:
-            raise ParseError(
-                f"Line {op_tok.line}: expected comparison operator "
-                f"(>, <, >=, <=, ==, !=), got {op_tok.value!r}"
-            )
-        operator = op_tok.value
+        op = self._current()
+        if op.type not in _COMPARISON_TYPES:
+            raise ParseError(f"Line {op.line}: expected comparison operator after expression, got {op.value!r}")
         self._advance()
-
         right = self._parse_expr()
-        return Condition(left=left, operator=operator, right=right)
+        return Condition(left=left, operator=op.value, right=right)
+
+    def _parse_rule(self) -> UserRuleCommand:
+        line = self._current().line; self._advance()
+        name = self._expect(TokenType.STRING, "rule name (string)")
+        self._expect(TokenType.LBRACE, "'{' after rule name")
+        self._expect(TokenType.WHEN, "'when'")
+        condition = self._parse_boolean_condition()
+        self._expect(TokenType.SEMICOLON, "';'")
+        self._expect(TokenType.SEVERITY, "'severity'")
+        sev = self._expect(TokenType.IDENT, "severity name")
+        if sev.value not in {"informational", "review_recommended", "medium", "high", "critical"}:
+            raise ParseError(f"Line {sev.line}: invalid severity {sev.value!r}")
+        self._expect(TokenType.SEMICOLON, "';'")
+        self._expect(TokenType.RBRACE, "'}'")
+        return UserRuleCommand(name=name.value, condition=condition, severity=sev.value, line=line)
 
     # ── Expression ─────────────────────────────────────────────────────────────
 

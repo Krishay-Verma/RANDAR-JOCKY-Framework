@@ -1,5 +1,5 @@
 """
-JOCKY Remote Agent.
+RANDAR Remote Agent.
 
 Runs on a target endpoint. Polls the central API for pending jobs,
 executes JOCKY scripts locally, and submits results back.
@@ -11,14 +11,14 @@ Usage:
         --agent-token YOUR_AGENT_TOKEN
 
 Or via environment variables:
-    JOCKY_API_URL, JOCKY_AGENT_ID, JOCKY_AGENT_TOKEN, JOCKY_POLL_INTERVAL
+    RANDAR_API_URL, RANDAR_AGENT_ID, RANDAR_AGENT_TOKEN, RANDAR_POLL_INTERVAL
 
 Security notes:
   - Agent token is never logged
   - Scripts go through the full lexer/parser/interpreter pipeline
     with all existing safety limits (variable cap, nesting cap, allowlist)
   - Connection errors use exponential backoff up to _MAX_BACKOFF seconds
-  - TLS verification is enabled by default — set JOCKY_TLS_VERIFY=false
+  - TLS verification is enabled by default — set RANDAR_TLS_VERIFY=false
     only in controlled dev environments
 """
 
@@ -37,7 +37,7 @@ load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [JOCKY-AGENT] %(levelname)s %(message)s",
+    format="%(asctime)s [RANDAR-AGENT] %(levelname)s %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger(__name__)
@@ -74,6 +74,15 @@ def _execute_script(script: str) -> dict:
             }
             for cr in result.collector_results
         ],
+        "analysis_results": [
+            {
+                "target": ar.target,
+                "status": ar.status,
+                "finding_count": ar.finding_count,
+                "error": ar.error,
+            }
+            for ar in result.analysis_results
+        ],
         "findings": [
             {
                 "rule_name":        f.rule_name,
@@ -92,7 +101,7 @@ def _execute_script(script: str) -> dict:
 
 # ── Agent class ────────────────────────────────────────────────────────────────
 
-class JockyAgent:
+class RandarAgent:
     def __init__(
         self,
         api_url:       str,
@@ -132,6 +141,14 @@ class JockyAgent:
         )
         resp.raise_for_status()
 
+    def _is_cancelled(self, job_id: str) -> bool:
+        try:
+            resp = self._session.get(self._url(f"/api/agents/{self.agent_id}/jobs/{job_id}/status"), timeout=5)
+            resp.raise_for_status()
+            return resp.json().get("status") == "cancelled"
+        except Exception:
+            return False
+
     def _submit_error(self, job_id: str, error: str) -> None:
         resp = self._session.post(
             self._url(f"/api/agents/{self.agent_id}/jobs/{job_id}/error"),
@@ -140,10 +157,16 @@ class JockyAgent:
         )
         resp.raise_for_status()
 
+    def _capabilities(self) -> list[str]:
+        from jocky.collectors.registry import list_collectors
+        from jocky.analysis.registry import list_rules
+        return [f"collector:{x}" for x in list_collectors()] + [f"rule:{x}" for x in list_rules()]
+
     def _heartbeat(self) -> None:
         try:
             self._session.post(
                 self._url(f"/api/agents/{self.agent_id}/heartbeat"),
+                json={"capabilities": self._capabilities()},
                 timeout=5,
             )
         except Exception:
@@ -174,6 +197,10 @@ class JockyAgent:
 
                 try:
                     result = _execute_script(script)
+                    if self._is_cancelled(job_id):
+                        log.info("Job %s was cancelled; result will not be submitted.", job_id)
+                        backoff = self.poll_interval
+                        continue
                     findings_count = len(result.get("findings", []))
                     log.info(
                         "Job %s complete — %d finding(s). Submitting...",
@@ -210,41 +237,41 @@ class JockyAgent:
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="JOCKY Remote Agent")
+    parser = argparse.ArgumentParser(description="RANDAR Remote Agent")
     parser.add_argument(
         "--api-url",
-        default=os.environ.get("JOCKY_API_URL", ""),
-        help="Central API URL (env: JOCKY_API_URL)",
+        default=os.environ.get("RANDAR_API_URL", os.environ.get("JOCKY_API_URL", "")),
+        help="Central API URL (env: RANDAR_API_URL; JOCKY_API_URL accepted for compatibility)",
     )
     parser.add_argument(
         "--agent-id",
-        default=os.environ.get("JOCKY_AGENT_ID", ""),
-        help="Agent ID from registration (env: JOCKY_AGENT_ID)",
+        default=os.environ.get("RANDAR_AGENT_ID", os.environ.get("JOCKY_AGENT_ID", "")),
+        help="Agent ID from registration (env: RANDAR_AGENT_ID; JOCKY_AGENT_ID accepted for compatibility)",
     )
     parser.add_argument(
         "--agent-token",
-        default=os.environ.get("JOCKY_AGENT_TOKEN", ""),
-        help="Agent token from registration (env: JOCKY_AGENT_TOKEN)",
+        default=os.environ.get("RANDAR_AGENT_TOKEN", os.environ.get("JOCKY_AGENT_TOKEN", "")),
+        help="Agent token from registration (env: RANDAR_AGENT_TOKEN; JOCKY_AGENT_TOKEN accepted for compatibility)",
     )
     parser.add_argument(
         "--poll-interval",
         type=int,
-        default=int(os.environ.get("JOCKY_POLL_INTERVAL", str(_DEFAULT_POLL_INTERVAL))),
-        help=f"Poll interval in seconds (env: JOCKY_POLL_INTERVAL, default: {_DEFAULT_POLL_INTERVAL})",
+        default=int(os.environ.get("RANDAR_POLL_INTERVAL", os.environ.get("JOCKY_POLL_INTERVAL", str(_DEFAULT_POLL_INTERVAL)))),
+        help=f"Poll interval in seconds (env: RANDAR_POLL_INTERVAL; JOCKY_POLL_INTERVAL accepted, default: {_DEFAULT_POLL_INTERVAL})",
     )
     parser.add_argument(
         "--no-tls-verify",
         action="store_true",
-        default=os.environ.get("JOCKY_TLS_VERIFY", "true").lower() == "false",
+        default=os.environ.get("RANDAR_TLS_VERIFY", os.environ.get("JOCKY_TLS_VERIFY", "true")).lower() == "false",
         help="Disable TLS certificate verification (dev only)",
     )
     args = parser.parse_args()
 
     missing = [
         label for label, val in [
-            ("--api-url / JOCKY_API_URL",       args.api_url),
-            ("--agent-id / JOCKY_AGENT_ID",     args.agent_id),
-            ("--agent-token / JOCKY_AGENT_TOKEN", args.agent_token),
+            ("--api-url / RANDAR_API_URL",       args.api_url),
+            ("--agent-id / RANDAR_AGENT_ID",     args.agent_id),
+            ("--agent-token / RANDAR_AGENT_TOKEN", args.agent_token),
         ]
         if not val.strip()
     ]
@@ -259,7 +286,7 @@ def main() -> None:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         log.warning("TLS verification disabled — dev/test use only.")
 
-    JockyAgent(
+    RandarAgent(
         api_url       = args.api_url,
         agent_id      = args.agent_id,
         agent_token   = args.agent_token,
@@ -270,3 +297,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+# Backward-compatible alias for existing deployments.
+JockyAgent = RandarAgent

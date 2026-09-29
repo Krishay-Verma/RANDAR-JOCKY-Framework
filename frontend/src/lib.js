@@ -11,6 +11,8 @@ export const SEV_COLOR = {
 };
 export const STATUS_LABEL = { open: "Open", in_review: "In review", closed: "Closed" };
 
+export const asArray = (value) => Array.isArray(value) ? value : [];
+
 export const RULE_LABEL = {
   suspicious_module_loads: "Suspicious module load",
   dll_sideloading: "Possible DLL sideloading",
@@ -18,6 +20,33 @@ export const RULE_LABEL = {
   reflective_load_indicators: "Reflective loading indicator",
   thread_hijacking_indicators: "Thread start anomaly",
   injection_correlation: "Injection evidence correlation",
+  suspicious_dns_queries: "Suspicious DNS query pattern",
+  dns_entropy: "DNS entropy indicator",
+  rare_domains: "Rare DNS domain",
+  suspicious_tld_patterns: "Suspicious TLD pattern",
+  dns_bursts: "DNS burst",
+  unusual_query_types: "Unusual DNS query type",
+  long_random_labels: "Long / random DNS label",
+  dns_tunneling_indicators: "Possible DNS tunneling indicator",
+  dns_beaconing: "Possible DNS beaconing",
+  network_beaconing: "Possible network beaconing",
+  port_scan: "Possible port scan",
+  horizontal_scan: "Possible horizontal scan",
+  service_discovery: "Possible service discovery",
+  udp_scan: "Possible UDP scan",
+  network_classification: "Network address classification",
+  encoded_powershell: "PowerShell encoded / hidden execution indicator",
+  suspicious_powershell_parent: "Suspicious PowerShell parent",
+  powershell_network_activity: "PowerShell network activity",
+  powershell_child_processes: "PowerShell child process",
+  suspicious_services: "Suspicious service",
+  writable_service_paths: "Writable service path",
+  persistence_correlation: "Persistence surface correlation",
+  unsigned_loaded_module: "Unsigned loaded module",
+  suspicious_imports: "Suspicious PE imports",
+  high_entropy_module: "High-entropy PE module",
+  module_disk_mismatch: "Module / disk mismatch",
+  suspicious_writable_module: "Suspicious writable module",
 };
 
 export function humanizeRule(name) {
@@ -31,6 +60,7 @@ export const COLLECTOR_LABEL = {
   system_info: "System information",
   processes: "Processes",
   network_connections: "Network connections",
+  network_artifacts: "Network evidence artifacts",
   logged_in_users: "Logged-in users",
   file_hash: "File hashes",
   scheduled_tasks: "Scheduled tasks",
@@ -40,6 +70,9 @@ export const COLLECTOR_LABEL = {
   modules: "Loaded DLLs / modules",
   threads: "Process threads",
   memory_regions: "Virtual memory regions",
+  windows_event_logs: "Windows Event Logs",
+  sysmon_events: "Sysmon events",
+  services: "Windows services",
 };
 
 export function humanizeCollector(name) {
@@ -126,10 +159,138 @@ export const TEMPLATES = {
     report "windows_injection_forensics";
 }
 `,
+  "Windows telemetry hunt": `investigation "Windows Telemetry Hunt" {
+    collect system_info;
+    collect processes;
+    collect network_connections;
+    collect windows_event_logs;
+    collect sysmon_events;
+    collect services;
+    collect startup_items;
+    collect scheduled_tasks;
+
+    analyze encoded_powershell;
+    analyze suspicious_powershell_parent;
+    analyze powershell_network_activity;
+    analyze powershell_child_processes;
+    analyze suspicious_services;
+    analyze writable_service_paths;
+    analyze persistence_correlation;
+
+    report "windows_telemetry_hunt";
+}
+`,
   "Evidence file hashing": `investigation "Evidence Hashing" {
     collect system_info;
     collect file_hash;
     report "evidence_hashes";
+}
+`,
+  "Network threat hunt": `investigation "Network Threat Hunt" {
+    collect network_artifacts;
+    collect processes;
+    collect network_connections;
+
+    analyze suspicious_dns_queries;
+    analyze dns_entropy;
+    analyze rare_domains;
+    analyze suspicious_tld_patterns;
+    analyze dns_bursts;
+    analyze unusual_query_types;
+    analyze long_random_labels;
+    analyze dns_tunneling_indicators;
+    analyze dns_beaconing;
+    analyze network_beaconing;
+
+    analyze port_scan;
+    analyze horizontal_scan;
+    analyze service_discovery;
+    analyze udp_scan;
+    analyze network_classification;
+    analyze process_network_correlation;
+
+    report "network_threat_hunt";
+}
+`,  "Domain Expansion Triage": `investigation "Domain Expansion Triage" {
+    collect system_info;
+    collect processes;
+    collect network_connections;
+    collect network_artifacts;
+    collect windows_event_logs;
+    collect sysmon_events;
+    collect services;
+    collect pe_metadata;
+    collect logged_in_users;
+    collect file_hash;
+    collect scheduled_tasks;
+    collect startup_items;
+    collect open_files;
+    collect local_users;
+    collect modules;
+    collect threads;
+    collect memory_regions;
+
+    analyze missing_paths;
+    analyze suspicious_processes;
+    analyze process_network_correlation;
+    analyze unusual_scheduled_tasks;
+    analyze suspicious_startup_items;
+    analyze high_connection_processes;
+    analyze privileged_user_anomaly;
+    analyze suspicious_module_loads;
+    analyze dll_sideloading;
+    analyze process_hollowing_indicators;
+    analyze reflective_load_indicators;
+    analyze thread_hijacking_indicators;
+    analyze injection_correlation;
+    analyze suspicious_dns_queries;
+    analyze dns_entropy;
+    analyze rare_domains;
+    analyze suspicious_tld_patterns;
+    analyze dns_bursts;
+    analyze unusual_query_types;
+    analyze long_random_labels;
+    analyze dns_tunneling_indicators;
+    analyze dns_beaconing;
+    analyze network_beaconing;
+    analyze port_scan;
+    analyze horizontal_scan;
+    analyze service_discovery;
+    analyze udp_scan;
+    analyze network_classification;
+    analyze encoded_powershell;
+    analyze suspicious_powershell_parent;
+    analyze powershell_network_activity;
+    analyze powershell_child_processes;
+    analyze suspicious_services;
+    analyze writable_service_paths;
+    analyze persistence_correlation;
+    analyze unsigned_loaded_module;
+    analyze suspicious_imports;
+    analyze high_entropy_module;
+    analyze module_disk_mismatch;
+    analyze suspicious_writable_module;
+
+    report "domain_expansion_triage";
+}
+`,
+  "V1.5 DSL Showcase": `investigation "V1.5 DSL Showcase" {
+    // Variables make repeated thresholds explicit and auditable.
+    let minimum_connections = 1;
+    collect processes;
+    collect network_connections;
+
+    // Boolean evidence filtering is bounded to approved properties.
+    analyze process_network_correlation
+    where destination.is_external == true and process.name != "svchost.exe";
+
+    // Analyst-authored rules run only against findings already produced by JOCKY.
+    rule "External Process Network Lead" {
+        when destination.is_external == true and process.name != "svchost.exe";
+        severity high;
+    }
+
+    report "v1_5_dsl_showcase";
 }
 `,
 };

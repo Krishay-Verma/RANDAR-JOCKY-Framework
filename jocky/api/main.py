@@ -25,15 +25,18 @@ from jocky.api.auth import assert_auth_configured
 from jocky.api.bytecode_routes import bytecode_router
 from jocky.api.routes import protected_router, public_router
 from jocky.storage.database import init_db
+from jocky.storage.audit import init_audit
+from jocky.api.agent_store import init_persistence as init_agent_persistence
+from jocky.storage.network_sources import init_network_sources
 
 try:
     assert_auth_configured()
 except RuntimeError as _auth_err:
     raise SystemExit(
-        f"\n[JOCKY] Startup aborted - authentication not configured:\n  {_auth_err}\n"
+        f"\n[RANDAR] Startup aborted - authentication not configured:\n  {_auth_err}\n"
     ) from _auth_err
 
-_MAX_BODY_BYTES = 20 * 1024 * 1024
+_MAX_BODY_BYTES = 28 * 1024 * 1024  # accommodates base64-wrapped 20 MiB evidence uploads
 _DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
@@ -67,25 +70,28 @@ def _install_windows_disconnect_handler() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    init_network_sources()
+    init_audit()
+    init_agent_persistence()
     _install_windows_disconnect_handler()
     yield
 
 
 app = FastAPI(
-    title="JOCKY Investigation API",
+    title="RANDAR Investigation API",
     description="Host triage and forensic investigation service. "
                 "All investigation endpoints require a bearer token.",
-    version="1.0.0",
+    version="1.9.2",
     lifespan=lifespan,
-    docs_url="/docs" if os.environ.get("JOCKY_DOCS", "true").lower() != "false" else None,
+    docs_url="/docs" if os.environ.get("RANDAR_DOCS", os.environ.get("JOCKY_DOCS", "true")).lower() != "false" else None,
     redoc_url=None,
 )
 
 _origins = [
     o.strip()
     for o in os.environ.get(
-        "JOCKY_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
-    ).split(",")
+        "RANDAR_CORS_ORIGINS", os.environ.get("JOCKY_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    )).split(",")
     if o.strip()
 ]
 app.add_middleware(

@@ -1,0 +1,5 @@
+investigation "Network Evidence Intake" {
+    // Select a Zeek/PCAP source in the JOCKY console before execution.
+    collect network_artifacts;
+    report "network_evidence";
+}

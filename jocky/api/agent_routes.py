@@ -31,12 +31,18 @@ from pydantic import BaseModel, Field
 
 from jocky.api import agent_store
 from jocky.api.auth import verify_token
+from jocky.reports.report import compute_report_hash
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
 
 class RegisterAgentRequest(BaseModel):
     hostname: str = Field(max_length=253)
     platform: str = Field(max_length=64)
+    capabilities: list[str] = Field(default_factory=list, max_length=200)
+
+
+class HeartbeatPayload(BaseModel):
+    capabilities: list[str] = Field(default_factory=list, max_length=200)
 
 
 class DispatchJobRequest(BaseModel):
@@ -111,12 +117,16 @@ def register_agent(payload: RegisterAgentRequest) -> dict:
             hostname=payload.hostname.strip(),
             platform=payload.platform.strip(),
         )
+        if payload.capabilities:
+            agent_store.update_capabilities(agent_id, payload.capabilities)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    agent = agent_store.get_agent(agent_id)
     return {
         "agent_id":    agent_id,
         "agent_token": token,
+        "capabilities": agent.capabilities if agent else [],
         "warning":     "Store this token securely — it is shown only once.",
     }
 
@@ -124,6 +134,14 @@ def register_agent(payload: RegisterAgentRequest) -> dict:
 @management_router.get("/api/agents")
 def list_agents() -> list[dict]:
     return agent_store.list_agents()
+
+
+@management_router.get("/api/agents/{agent_id}/capabilities")
+def agent_capabilities(agent_id: str) -> dict:
+    agent = agent_store.get_agent(agent_id)
+    if agent is None or agent.revoked_at:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    return {"agent_id": agent_id, "capabilities": sorted(agent.capabilities), "last_seen": agent.last_seen}
 
 
 @management_router.post("/api/agents/{agent_id}/jobs")
@@ -149,7 +167,9 @@ def dispatch_job(agent_id: str, payload: DispatchJobRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    return {"job_id": job_id, "agent_id": agent_id, "status": "pending"}
+    job = agent_store.get_job(job_id)
+    return {"job_id": job_id, "agent_id": agent_id, "status": "pending",
+            "expires_at": job.expires_at if job else None, "signature": job.signature if job else None}
 
 
 @management_router.get("/api/agents/{agent_id}/jobs")
@@ -185,6 +205,13 @@ def revoke_agent(agent_id: str) -> dict:
     return {"deleted": True}
 
 
+@management_router.post("/api/agents/{agent_id}/jobs/{job_id}/cancel")
+def cancel_agent_job(agent_id: str, job_id: str) -> dict:
+    if not agent_store.cancel_job(agent_id, job_id):
+        raise HTTPException(status_code=409, detail="Job cannot be cancelled in its current state.")
+    return {"cancelled": True, "job_id": job_id}
+
+
 @management_router.delete("/api/agents/{agent_id}/jobs/{job_id}")
 def delete_agent_job(agent_id: str, job_id: str) -> dict:
     if not agent_store.delete_job(agent_id, job_id):
@@ -209,12 +236,39 @@ def import_job_result(agent_id: str, job_id: str) -> dict:
         "started_at": r["started_at"],
         "finished_at": r["finished_at"],
         "collector_results": r["collector_results"],
+        "analysis_results": r.get("analysis_results", []),
         "findings": r["findings"],
-        "collector_errors": [],
+        "collector_errors": [
+            {"target": cr.get("target"), "error": cr.get("error")}
+            for cr in r.get("collector_results", [])
+            if cr.get("status") == "error"
+        ],
         "report_name": r.get("report_name"),
-        "script_hash": None,
+        "script_hash": r.get("script_hash"),
         "source": {"type": "agent", "agent_id": agent_id, "job_id": job_id},
     }
+    from jocky.reports.report import Report, CollectorResult, AnalysisResult, Finding
+    report_model = Report(
+        investigation_name=report["investigation_name"],
+        endpoint_hostname=report["endpoint_hostname"],
+        started_at=report["started_at"],
+        finished_at=report["finished_at"],
+        collector_results=[CollectorResult(**cr) for cr in report["collector_results"]],
+        analysis_results=[AnalysisResult(**ar) for ar in report.get("analysis_results", [])],
+        findings=[Finding(**f) for f in report["findings"]],
+        collector_errors=report["collector_errors"],
+        report_name=report["report_name"],
+        script_hash=report["script_hash"],
+        source=report["source"],
+        product_name=report.get("product_name", "RANDAR"),
+        product_version=report.get("product_version", "1.9.2"),
+        dsl_name=report.get("dsl_name", "JOCKY"),
+        dsl_version=report.get("dsl_version", "1.5"),
+        bytecode_hash=report.get("bytecode_hash"),
+        timeline=report.get("timeline", []),
+        integrity_version=report.get("integrity_version", 1),
+    )
+    report["report_hash"] = compute_report_hash(report_model)
     new_id = save_investigation(
         investigation_name=name,
         endpoint_hostname=report["endpoint_hostname"],
@@ -245,7 +299,16 @@ def poll_pending_job(
     job = agent_store.claim_pending_job(agent_id)
     if job is None:
         return {"job_id": None, "script": None}
-    return {"job_id": job.job_id, "script": job.script}
+    return {"job_id": job.job_id, "script": job.script, "expires_at": job.expires_at, "nonce": job.nonce, "signature": job.signature}
+
+
+@agent_router.get("/api/agents/{agent_id}/jobs/{job_id}/status")
+def agent_job_status(agent_id: str, job_id: str, _: None = Depends(_require_agent_auth)) -> dict:
+    job = agent_store.get_job(job_id)
+    if job is None or job.agent_id != agent_id:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    agent_store.touch_agent(agent_id)
+    return {"job_id": job.job_id, "status": job.status, "expires_at": job.expires_at}
 
 
 @agent_router.post("/api/agents/{agent_id}/jobs/{job_id}/result")
@@ -299,8 +362,10 @@ def submit_job_error(
 @agent_router.post("/api/agents/{agent_id}/heartbeat")
 def heartbeat(
     agent_id: str,
+    payload: HeartbeatPayload | None = None,
     _: None = Depends(_require_agent_auth),
 ) -> dict:
-    """Agent liveness ping — updates last_seen timestamp."""
-    agent_store.touch_agent(agent_id)
-    return {"status": "ok"}
+    """Agent liveness ping and capability negotiation."""
+    agent_store.touch_agent(agent_id, (payload.capabilities if payload else None))
+    agent = agent_store.get_agent(agent_id)
+    return {"status": "ok", "capabilities": sorted(agent.capabilities) if agent else []}

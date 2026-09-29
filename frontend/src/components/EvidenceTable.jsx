@@ -1,6 +1,7 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { fmtTime } from "../lib";
-
+import { api } from "../api/client";
+import { Loading, Notice } from "./ui";
 
 const PAGE = 100;
 const isTime = (k) => /(_at|time|started)$/.test(k);
@@ -14,51 +15,84 @@ function cell(k, v) {
   return String(v);
 }
 
-/** Renders a collector's data: scalar fields as key/value, the first list as a filterable table. */
-export default function EvidenceTable({ data }) {
+/**
+ * Renders a collector's scalar metadata plus its evidence list.
+ * V1.9 supports lazy server-side paging when investigationId/collectorTarget
+ * are supplied, so opening a large evidence source does not download the
+ * complete collector payload into the browser.
+ */
+export default function EvidenceTable({ data, investigationId = null, collectorTarget = null }) {
+  const remote = Boolean(investigationId && collectorTarget);
   const [q, setQ] = useState("");
-  const [shown, setShown] = useState(PAGE);
-  const listKey = useMemo(() => Object.keys(data || {}).find((k) => Array.isArray(data[k])), [data]);
-  const rows = useMemo(() => (listKey ? data[listKey] : []), [data, listKey]);
-  const scalars = Object.entries(data || {}).filter(([k]) => k !== listKey);
+  const [page, setPage] = useState(1);
+  const [remoteState, setRemoteState] = useState({ data: null, error: null, loading: false });
+
+  useEffect(() => {
+    if (!remote) return undefined;
+    let alive = true;
+    setRemoteState((s) => ({ ...s, loading: true, error: null }));
+    api.evidencePage(investigationId, collectorTarget, page, PAGE, q)
+      .then((value) => alive && setRemoteState({ data: value, error: null, loading: false }))
+      .catch((error) => alive && setRemoteState({ data: null, error, loading: false }));
+    return () => { alive = false; };
+  }, [remote, investigationId, collectorTarget, page, q]);
+
+  const localListKey = useMemo(() => Object.keys(data || {}).find((k) => Array.isArray(data[k])), [data]);
+  const localRows = useMemo(() => (localListKey ? data[localListKey] : []), [data, localListKey]);
+  const localScalars = useMemo(() => Object.entries(data || {}).filter(([k]) => k !== localListKey).reduce((acc, [k, v]) => ({ ...acc, [k]: v }), {}), [data, localListKey]);
+  const listKey = remote ? remoteState.data?.list_key : localListKey;
+  const rows = remote ? (Array.isArray(remoteState.data?.rows) ? remoteState.data.rows : []) : localRows;
+  const scalars = remote ? (remoteState.data?.scalars || {}) : localScalars;
   const cols = useMemo(() => {
     const seen = [];
     rows.slice(0, 25).forEach((r) => Object.keys(r || {}).forEach((k) => !seen.includes(k) && seen.push(k)));
     return seen.slice(0, 7);
   }, [rows]);
   const filtered = useMemo(() => {
+    if (remote) return rows;
     const n = q.trim().toLowerCase();
     return n ? rows.filter((r) => JSON.stringify(r).toLowerCase().includes(n)) : rows;
-  }, [rows, q]);
+  }, [remote, rows, q]);
+  const total = remote ? (remoteState.data?.total || 0) : filtered.length;
+  const hasNext = remote ? Boolean(remoteState.data?.has_next) : filtered.length > page * PAGE;
+
+  function changeQuery(value) {
+    setQ(value);
+    setPage(1);
+  }
 
   return (
     <div>
-      {scalars.length > 0 && (
+      {Object.entries(scalars).length > 0 && (
         <dl className="kv" style={{ padding: "12px 16px", borderBottom: listKey ? "1px solid var(--line)" : 0 }}>
-          {scalars.map(([k, v]) => (<Fragment key={k}><dt>{k.replace(/_/g, " ")}</dt><dd className="mono">{cell(k, v)}</dd></Fragment>))}
+          {Object.entries(scalars).map(([k, v]) => (<Fragment key={k}><dt>{k.replace(/_/g, " ")}</dt><dd className="mono">{cell(k, v)}</dd></Fragment>))}
         </dl>
       )}
+      {remoteState.error && <Notice>{remoteState.error.message}</Notice>}
+      {remoteState.loading && !remoteState.data && <Loading />}
       {listKey && (
         <>
           <div className="panel-h">
             <input className="input" style={{ maxWidth: 280 }} placeholder={`Filter ${listKey}`} value={q}
-              onChange={(e) => { setQ(e.target.value); setShown(PAGE); }} aria-label="Filter evidence" />
-            <span style={{ color: "var(--mute)" }}>{filtered.length} of {rows.length}</span>
+              onChange={(e) => changeQuery(e.target.value)} aria-label="Filter evidence" />
+            <span style={{ color: "var(--mute)" }}>{remote ? `${total} records` : `${filtered.length} of ${rows.length}`}</span>
           </div>
           <div className="tbl-wrap">
             <table className="t">
               <thead><tr>{cols.map((c) => <th key={c}>{c.replace(/_/g, " ")}</th>)}</tr></thead>
               <tbody>
-                {filtered.slice(0, shown).map((r, i) => (
+                {filtered.map((r, i) => (
                   <tr key={i}>{cols.map((c) => <td key={c} className="mono" style={{ wordBreak: "break-all" }}>{cell(c, r?.[c])}</td>)}</tr>
                 ))}
-                {filtered.length === 0 && <tr><td colSpan={cols.length || 1} style={{ color: "var(--mute)" }}>No entries.</td></tr>}
+                {!remoteState.loading && filtered.length === 0 && <tr><td colSpan={cols.length || 1} style={{ color: "var(--mute)" }}>No entries.</td></tr>}
               </tbody>
             </table>
           </div>
-          {filtered.length > shown && (
-            <div style={{ padding: 12, textAlign: "center" }}>
-              <button className="btn sm" onClick={() => setShown((n) => n + PAGE)}>Show more ({filtered.length - shown} remaining)</button>
+          {(remote ? (hasNext || page > 1) : (filtered.length > page * PAGE || page > 1)) && (
+            <div className="panel-b row" style={{ justifyContent: "space-between" }}>
+              <button className="btn sm" disabled={page <= 1 || remoteState.loading} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</button>
+              <span className="muted-copy">Page {page} · {remote ? total : filtered.length} records</span>
+              <button className="btn sm" disabled={!hasNext || remoteState.loading} onClick={() => setPage((p) => p + 1)}>Next</button>
             </div>
           )}
         </>

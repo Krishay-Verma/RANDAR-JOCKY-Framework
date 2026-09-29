@@ -56,7 +56,9 @@ def compile_script_to_bytecode(request: ScriptRequest) -> dict:
     try:
         blob = compile_investigation(investigation)
         header, opcodes = verify_and_load(blob)  # round-trip integrity check
-    except (RuntimeError, BytecodeError) as exc:
+    except BytecodeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     b64 = base64.b64encode(blob).decode("ascii")
 
@@ -152,7 +154,7 @@ def _opcodes_to_ir(name: str, opcodes: list[dict]):
     """Reconstruct an Investigation IR from a flat opcode list."""
     from jocky.language.ir import (
         Investigation, CollectCommand, AnalyzeCommand,
-        ReportCommand, LetCommand, IfCommand,
+        ReportCommand, LetCommand, IfCommand, UserRuleCommand,
         LiteralExpr, VarExpr, PropertyExpr, Condition,
     )
 
@@ -169,11 +171,10 @@ def _opcodes_to_ir(name: str, opcodes: list[dict]):
         raise ValueError(f"Unknown expr kind: {kind!r}")
 
     def build_condition(c: dict):
-        return Condition(
-            left=build_expr(c["left"]),
-            operator=c["operator"],
-            right=build_expr(c["right"]),
-        )
+        kind = c.get("kind", "comparison")
+        if kind in {"and", "or", "not"}:
+            return Condition(kind=kind, children=[build_condition(x) for x in c.get("children", [])])
+        return Condition(left=build_expr(c["left"]), operator=c["operator"], right=build_expr(c["right"]), kind="comparison")
 
     def consume(ops: list[dict], count: int, offset: int):
         return ops[offset: offset + count], offset + count
@@ -190,7 +191,9 @@ def _opcodes_to_ir(name: str, opcodes: list[dict]):
                 commands.append(CollectCommand(target=op["target"], line=line))
                 i += 1
             elif name_ == "ANALYZE":
-                commands.append(AnalyzeCommand(rule=op["rule"], line=line))
+                commands.append(AnalyzeCommand(rule=op["rule"], line=line, where=build_condition(op["where"]) if op.get("where") else None))
+            elif name_ == "USER_RULE":
+                commands.append(UserRuleCommand(name=op["name"], condition=build_condition(op["condition"]), severity=op["severity"], line=line))
                 i += 1
             elif name_ == "REPORT":
                 commands.append(ReportCommand(name=op["name"], line=line))

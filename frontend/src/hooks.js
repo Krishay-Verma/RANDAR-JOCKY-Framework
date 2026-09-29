@@ -1,35 +1,54 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-/** Load async data; `reload()` refetches. Ignores results after unmount. */
+/** Load async data; stale requests are ignored after navigation/unmount. */
 export function useLoad(fn, deps = [], intervalMs = 0) {
   const [state, setState] = useState({ data: null, error: null, loading: true });
-  const alive = useRef(true);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const mounted = useRef(false);
+  const generation = useRef(0);
+  const activeController = useRef(null);
   const run = useCallback(fn, deps);
 
   const load = useCallback(
     async (silent = false) => {
-      if (!silent) setState((s) => ({ ...s, loading: true }));
+      if (typeof run !== "function") {
+        const err = new TypeError("RANDAR data loader is not callable.");
+        if (mounted.current) setState((s) => ({ data: silent ? s.data : null, error: err, loading: false }));
+        return;
+      }
+      const current = ++generation.current;
+      activeController.current?.abort();
+      if (!silent && mounted.current) setState((s) => ({ ...s, loading: true, error: null }));
+      const controller = new AbortController();
+      activeController.current = controller;
       try {
-        const data = await run();
-        if (alive.current) setState({ data, error: null, loading: false });
+        // Loaders may accept an AbortSignal; legacy zero-argument loaders remain compatible.
+        const data = await run(controller.signal);
+        if (mounted.current && current === generation.current) setState({ data, error: null, loading: false });
       } catch (e) {
-        if (alive.current) setState((s) => ({ data: silent ? s.data : null, error: e, loading: false }));
+        if (e?.name === "AbortError") return;
+        if (mounted.current && current === generation.current) setState((s) => ({ data: silent ? s.data : null, error: e, loading: false }));
+      } finally {
+        if (activeController.current === controller) activeController.current = null;
       }
     },
     [run],
   );
 
   useEffect(() => {
-    alive.current = true;
-    load();
-    let t;
-    if (intervalMs) t = setInterval(() => load(true), intervalMs);
+    mounted.current = true;
+    const runGeneration = ++generation.current;
+    void load();
+    let timer;
+    if (intervalMs) timer = setInterval(() => void load(true), intervalMs);
     return () => {
-      alive.current = false;
-      if (t) clearInterval(t);
+      mounted.current = false;
+      generation.current = Math.max(generation.current, runGeneration + 1);
+      activeController.current?.abort();
+      activeController.current = null;
+      if (timer) clearInterval(timer);
     };
   }, [load, intervalMs]);
 
-  return { ...state, reload: () => load(false) };
+  const reload = useCallback(() => load(false), [load]);
+  return { ...state, reload };
 }

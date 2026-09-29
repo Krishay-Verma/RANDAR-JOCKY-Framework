@@ -7,7 +7,7 @@ so a human investigator can verify it themselves. Severity is
 informational by design — see SEVERITY note below.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 # Severity is deliberately limited to non-alarmist language. JOCKY does
@@ -36,3 +36,7 @@ class Finding:
     summary: str          # one-line human-readable description
     reason: str             # why this rule fired
     related_evidence: dict  # e.g. {"pid": 1234, "path": "..."}
+    finding_id: str | None = None
+    evidence_refs: list[dict] = field(default_factory=list)
+    limitations: str | None = None
+    next_check: str | None = None

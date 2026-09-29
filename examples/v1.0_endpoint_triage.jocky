@@ -1,0 +1,33 @@
+// JOCKY v1.0 — Stable Forensic Triage reference investigation.
+// Runs only the collectors and analysis rules included in the v1.0 milestone.
+
+investigation "V1.0 Endpoint Triage" {
+    collect system_info;
+    collect processes;
+    collect network_connections;
+    collect logged_in_users;
+    collect file_hash;
+    collect scheduled_tasks;
+    collect startup_items;
+    collect open_files;
+    collect local_users;
+    collect modules;
+    collect threads;
+    collect memory_regions;
+
+    analyze missing_paths;
+    analyze suspicious_processes;
+    analyze process_network_correlation;
+    analyze unusual_scheduled_tasks;
+    analyze suspicious_startup_items;
+    analyze high_connection_processes;
+    analyze privileged_user_anomaly;
+    analyze suspicious_module_loads;
+    analyze dll_sideloading;
+    analyze process_hollowing_indicators;
+    analyze reflective_load_indicators;
+    analyze thread_hijacking_indicators;
+    analyze injection_correlation;
+
+    report "v1.0_endpoint_triage";
+}

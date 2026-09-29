@@ -39,7 +39,7 @@ function RegisterModal({ onClose, onDone }) {
           <select className="select" value={platform} onChange={(e) => setPlatform(e.target.value)}><option>Linux</option><option>Windows</option></select></label>
       </>) : (<>
         <Notice kind="warn">The agent token is shown once and cannot be recovered. Copy it now.</Notice>
-        <p style={{ margin: "0 0 6px", color: "var(--mute)" }}>Run on the endpoint (from the JOCKY directory):</p>
+        <p style={{ margin: "0 0 6px", color: "var(--mute)" }}>Run on the endpoint (from the RANDAR directory):</p>
         <pre className="json" style={{ maxHeight: "none" }}>{cmd}</pre>
         <button className="btn sm" style={{ marginTop: 10 }} onClick={async () => setCopied(await copyText(cmd))}>{copied ? "Copied" : "Copy command"}</button>
       </>)}
@@ -69,13 +69,15 @@ function DispatchModal({ agent, onClose, onDone }) {
 function ResultModal({ agent, job, onClose }) {
   const { data, error, loading } = useLoad(() => api.jobResult(agent.agent_id, job.job_id), []);
   const r = data?.result;
+  const collectorResults = Array.isArray(r?.collector_results) ? r.collector_results : [];
+  const findings = Array.isArray(r?.findings) ? r.findings : [];
   return (
     <Modal wide title={`Job ${job.job_id.slice(0, 8)}`} onClose={onClose}>
       {loading ? <Loading /> : error ? <Notice>{error.message}</Notice> : data.error ? <Notice>{data.error}</Notice> : !r ? <Empty title="No result yet" /> : (<>
-        <p style={{ color: "var(--mute)", marginTop: 0 }}>{r.collector_results.length} collectors &middot; {r.findings.length} findings &middot; finished {fmtTime(r.finished_at)}</p>
+        <p style={{ color: "var(--mute)", marginTop: 0 }}>{collectorResults.length} collectors &middot; {findings.length} findings &middot; finished {fmtTime(r.finished_at)}</p>
         <table className="t"><thead><tr><th>Severity</th><th>Rule</th><th>Summary</th></tr></thead>
-          <tbody>{r.findings.slice(0, 200).map((f, i) => (<tr key={i}><td><SevBadge sev={f.severity} /></td><td className="mono">{f.rule_name}</td><td>{f.summary}</td></tr>))}
-            {r.findings.length === 0 && <tr><td colSpan={3} style={{ color: "var(--mute)" }}>No findings.</td></tr>}</tbody></table>
+          <tbody>{findings.slice(0, 200).map((f, i) => (<tr key={i}><td><SevBadge sev={f.severity} /></td><td className="mono">{f.rule_name}</td><td>{f.summary}</td></tr>))}
+            {findings.length === 0 && <tr><td colSpan={3} style={{ color: "var(--mute)" }}>No findings.</td></tr>}</tbody></table>
       </>)}
     </Modal>
   );
@@ -83,7 +85,7 @@ function ResultModal({ agent, job, onClose }) {
 
 function Jobs({ agent, onMessage }) {
   const navigate = useNavigate();
-  const { data, error, loading, reload } = useLoad(() => api.jobs(agent.agent_id), [agent.agent_id], 6000);
+  const { data, error, loading, reload } = useLoad((signal) => api.jobs(agent.agent_id, signal), [agent.agent_id], 6000);
   const [view, setView] = useState(null);
   const [del, setDel] = useState(null);
 
@@ -91,26 +93,32 @@ function Jobs({ agent, onMessage }) {
     try { const r = await api.importJob(agent.agent_id, j.job_id); navigate(`/investigations/${r.id}`); }
     catch (e) { onMessage({ kind: "err", text: e.message }); }
   }
+  async function cancelJob(j) {
+    try { await api.cancelJob(agent.agent_id, j.job_id); await reload(); onMessage({ kind: "ok", text: `Job ${j.job_id.slice(0, 8)} cancelled.` }); }
+    catch (e) { onMessage({ kind: "err", text: e.message }); }
+  }
   async function remove() {
     try { await api.deleteJob(agent.agent_id, del.job_id); reload(); }
     catch (e) { onMessage({ kind: "err", text: e.message }); }
     setDel(null);
   }
+  const jobs = Array.isArray(data) ? data : [];
   return (
     <div className="panel" style={{ marginTop: 16 }}>
       <div className="panel-h"><h3>Jobs &mdash; {agent.hostname}</h3><button className="btn sm" onClick={reload}>Refresh</button></div>
       {loading && !data ? <Loading /> : error ? <div className="panel-b"><Notice>{error.message}</Notice></div> :
-        data.length === 0 ? <Empty title="No jobs">Dispatch a script to this agent.</Empty> : (
+        jobs.length === 0 ? <Empty title="No jobs">Dispatch a script to this agent.</Empty> : (
           <div className="tbl-wrap"><table className="t">
-            <thead><tr><th>Job</th><th>Status</th><th>Created</th><th>Completed</th><th /></tr></thead>
-            <tbody>{data.map((j) => (
+            <thead><tr><th>Job</th><th>Status</th><th>Created</th><th>Expires</th><th>Completed</th><th /></tr></thead>
+            <tbody>{jobs.map((j) => (
               <tr key={j.job_id}>
                 <td className="mono">{j.job_id.slice(0, 10)}</td>
                 <td><Pill value={j.status} label={j.status} />{j.error && <div style={{ color: "#ff8a8a", fontSize: 12 }}>{j.error.slice(0, 90)}</div>}</td>
-                <td className="num">{fmtTime(j.created_at)}</td><td className="num">{fmtTime(j.completed_at)}</td>
+                <td className="num">{fmtTime(j.created_at)}</td><td className="num">{fmtTime(j.expires_at)}</td><td className="num">{fmtTime(j.completed_at)}</td>
                 <td><div className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
                   {j.has_result && <button className="btn sm" onClick={() => setView(j)}>View</button>}
                   {j.has_result && <button className="btn sm primary" onClick={() => importJob(j)}>Save as investigation</button>}
+                  {(j.status === "pending" || j.status === "running") && <button className="btn sm" onClick={() => cancelJob(j)}>Cancel</button>}
                   <button className="btn sm danger" onClick={() => setDel(j)}>Delete</button>
                 </div></td>
               </tr>))}</tbody></table></div>)}
@@ -121,16 +129,18 @@ function Jobs({ agent, onMessage }) {
 }
 
 export default function Agents() {
-  const { data, error, loading, reload } = useLoad(() => api.agents(), [], 8000);
+  const { data, error, loading, reload } = useLoad((signal) => api.agents(signal), [], 8000);
   const [reg, setReg] = useState(false);
   const [dispatch, setDispatch] = useState(null);
   const [sel, setSel] = useState(null);
   const [revoke, setRevoke] = useState(null);
   const [msg, setMsg] = useState({ kind: "ok", text: "" });
-  const selected = data?.find((a) => a.agent_id === sel);
+  const [capabilities, setCapabilities] = useState(null);
+  const agents = Array.isArray(data) ? data : [];
+  const selected = agents.find((a) => a.agent_id === sel);
 
   async function doRevoke() {
-    try { await api.revokeAgent(revoke.agent_id); if (sel === revoke.agent_id) setSel(null); reload(); setMsg({ kind: "ok", text: `Agent ${revoke.hostname} revoked.` }); }
+    try { await api.revokeAgent(revoke.agent_id); if (sel === revoke.agent_id) setSel(null); await reload(); setMsg({ kind: "ok", text: `Agent ${revoke.hostname} revoked.` }); }
     catch (e) { setMsg({ kind: "err", text: e.message }); }
     setRevoke(null);
   }
@@ -141,27 +151,29 @@ export default function Agents() {
         <div><h2>Endpoint agents</h2><p>Dispatch investigations to remote hosts and collect their results.</p></div>
         <button className="btn primary" onClick={() => setReg(true)}>Register agent</button>
       </div>
-      <Notice kind="info">The agent registry is held in server memory. After the API restarts, agents must be registered again; save important results as investigations.</Notice>
+      <Notice kind="info">Agent identity, last-seen state, capabilities and revocation status persist in RANDAR storage. Job execution remains bounded and every dispatched job carries an expiration and integrity signature.</Notice>
       <Notice kind={msg.kind}>{msg.text}</Notice>
       <div className="panel">
         {loading && !data ? <Loading /> : error ? <div className="panel-b"><Notice>{error.message}</Notice></div> :
-          data.length === 0 ? <Empty title="No agents registered">Register an agent to run investigations on another endpoint.</Empty> : (
+          agents.length === 0 ? <Empty title="No agents registered">Register an agent to run investigations on another endpoint.</Empty> : (
             <div className="tbl-wrap"><table className="t">
-              <thead><tr><th>Hostname</th><th>Platform</th><th>Agent ID</th><th>State</th><th>Last seen</th><th /></tr></thead>
-              <tbody>{data.map((a) => (
+              <thead><tr><th>Hostname</th><th>Platform</th><th>Agent ID</th><th>State</th><th>Last seen</th><th>Capabilities</th><th /></tr></thead>
+              <tbody>{agents.map((a) => (
                 <tr key={a.agent_id} className="click" onClick={() => setSel(a.agent_id)} style={sel === a.agent_id ? { background: "#121b2b" } : null}>
                   <td>{a.hostname}</td><td>{a.platform}</td><td className="mono">{a.agent_id}</td>
                   <td>{isOnline(a) ? <Pill value="online" label="Online" /> : <Pill value="offline" label={a.last_seen ? "Offline" : "Never seen"} />}</td>
                   <td className="num">{fmtTime(a.last_seen)}</td>
+                  <td><span className="mono">{a.capabilities?.length ?? 0}</span> negotiated</td>
                   <td onClick={(e) => e.stopPropagation()}><div className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
-                    <button className="btn sm primary" onClick={() => setDispatch(a)}>Dispatch</button>
+                    <button className="btn sm" onClick={async () => { try { setCapabilities(await api.agentCapabilities(a.agent_id)); } catch (e) { setMsg({ kind: "err", text: e.message }); } }}>Capabilities</button><button className="btn sm primary" onClick={() => setDispatch(a)}>Dispatch</button>
                     <button className="btn sm danger" onClick={() => setRevoke(a)}>Revoke</button></div></td>
                 </tr>))}</tbody></table></div>)}
       </div>
       {selected && <Jobs agent={selected} onMessage={setMsg} />}
+      {capabilities && <Modal wide title={`Capabilities — ${capabilities.agent_id}`} onClose={() => setCapabilities(null)} footer={<button className="btn primary" onClick={() => setCapabilities(null)}>Close</button>}><p className="muted-copy">Last negotiated: {fmtTime(capabilities.last_seen)}</p><div className="tbl-wrap"><table className="t"><thead><tr><th>Type</th><th>Capability</th></tr></thead><tbody>{(capabilities.capabilities || []).map((c) => { const [kind, ...rest] = c.split(":"); return <tr key={c}><td>{kind}</td><td className="mono">{rest.join(":")}</td></tr>; })}</tbody></table></div></Modal>}
       {reg && <RegisterModal onClose={() => setReg(false)} onDone={reload} />}
       {dispatch && <DispatchModal agent={dispatch} onClose={() => setDispatch(null)} onDone={() => { setSel(dispatch.agent_id); setDispatch(null); setMsg({ kind: "ok", text: "Job queued." }); }} />}
-      {revoke && <Confirm title="Revoke agent" confirmLabel="Revoke" message={`Revoke ${revoke.hostname}? Its token stops working immediately and its job history is removed.`} onCancel={() => setRevoke(null)} onConfirm={doRevoke} />}
+      {revoke && <Confirm title="Revoke agent" confirmLabel="Revoke" message={`Revoke ${revoke.hostname}? Its token stops working immediately and pending/running jobs are cancelled.`} onCancel={() => setRevoke(null)} onConfirm={doRevoke} />}
     </>
   );
 }

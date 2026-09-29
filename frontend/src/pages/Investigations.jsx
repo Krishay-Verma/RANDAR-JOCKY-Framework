@@ -9,12 +9,15 @@ import { STATUS_LABEL, fmtTime } from "../lib";
 const INJECTION_RULES = new Set([
   "suspicious_module_loads", "dll_sideloading", "process_hollowing_indicators",
   "reflective_load_indicators", "thread_hijacking_indicators", "injection_correlation",
+  "unsigned_loaded_module", "suspicious_imports", "high_entropy_module",
+  "module_disk_mismatch", "suspicious_writable_module",
 ]);
 function injectionState(record) {
   const report = record?.report_json;
   const findings = (report?.findings || []).filter((f) => INJECTION_RULES.has(f.rule_name));
   const modules = report?.collector_results?.find((c) => c.target === "modules")?.data?.count || 0;
-  return { findings, modules };
+  const peFiles = report?.collector_results?.find((c) => c.target === "pe_metadata")?.data?.count || 0;
+  return { findings, modules, peFiles };
 }
 
 export function EditCaseModal({ record, onClose, onSaved }) {
@@ -47,24 +50,27 @@ export function EditCaseModal({ record, onClose, onSaved }) {
 }
 
 export default function Investigations() {
-  const { data, error, loading, reload } = useLoad(() => api.investigations(), []);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
   const [sort, setSort] = useState("newest");
+  const [page, setPage] = useState(1);
+  const [queryState, setQueryState] = useState({ q: "", status: "all", sort: "newest", page: 1 });
+  const { data: pageData, error, loading, reload } = useLoad((signal) => api.investigationsPage(queryState.page, 25, queryState.q, queryState.status, queryState.sort, signal), [queryState]);
+  const data = Array.isArray(pageData?.items) ? pageData.items : [];
   const [edit, setEdit] = useState(null);
   const [del, setDel] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({ kind: "ok", text: "" });
 
-  const rows = useMemo(() => {
-    let r = (data || []).filter((x) =>
-      (status === "all" || x.status === status) &&
-      `${x.investigation_name} ${x.endpoint_hostname} ${x.id}`.toLowerCase().includes(q.trim().toLowerCase()));
-    const sev = (x) => (x.severity_counts.critical || 0) * 1e6 + (x.severity_counts.high || 0) * 1e3 + (x.severity_counts.medium || 0);
-    if (sort === "severity") r = [...r].sort((a, b) => sev(b) - sev(a));
-    if (sort === "oldest") r = [...r].reverse();
-    return r;
-  }, [data, q, status, sort]);
+  const rows = useMemo(() => data || [], [data]);
+
+  function applyFilters(next = {}) {
+    const nextState = {
+      q: next.q ?? q, status: next.status ?? status, sort: next.sort ?? sort, page: next.page ?? 1,
+    };
+    setPage(nextState.page);
+    setQueryState(nextState);
+  }
 
   async function confirmDelete() {
     setBusy(true);
@@ -86,22 +92,22 @@ export default function Investigations() {
       <div className="panel">
         <div className="panel-h">
           <div className="row" style={{ flex: 1 }}>
-            <input className="input" style={{ maxWidth: 300 }} placeholder="Search name, endpoint or ID" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search" />
-            <select className="select" style={{ width: 150 }} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status filter">
+            <input className="input" style={{ maxWidth: 300 }} placeholder="Search name, endpoint or ID" value={q} onChange={(e) => { setQ(e.target.value); applyFilters({ q: e.target.value }); }} aria-label="Search" />
+            <select className="select" style={{ width: 150 }} value={status} onChange={(e) => { setStatus(e.target.value); applyFilters({ status: e.target.value }); }} aria-label="Status filter">
               <option value="all">All statuses</option>
               {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
-            <select className="select" style={{ width: 150 }} value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort">
+            <select className="select" style={{ width: 150 }} value={sort} onChange={(e) => applyFilters({ sort: e.target.value })} aria-label="Sort">
               <option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="severity">Highest severity</option>
             </select>
           </div>
-          <span style={{ color: "var(--mute)" }}>{rows.length} shown</span>
+          <span style={{ color: "var(--mute)" }}>{pageData?.total ?? rows.length} cases · page {pageData?.page ?? 1}</span>
         </div>
         {loading && !data ? <Loading /> : error ? <div className="panel-b"><Notice>{error.message}</Notice></div> :
-          rows.length === 0 ? <Empty title={data.length ? "No matches" : "No investigations yet"}>{data.length ? "Adjust the filters." : "Run an investigation to see it here."}</Empty> : (
+          rows.length === 0 ? <Empty title={pageData?.total ? "No matches" : "No investigations yet"}>{pageData?.total ? "Adjust the filters." : "Run an investigation to see it here."}</Empty> : (
             <div className="tbl-wrap">
               <table className="t">
-                <thead><tr><th>ID</th><th>Name</th><th>Endpoint</th><th>Started</th><th>C / H / M</th><th>Findings</th><th>DLL / injection</th><th>Status</th><th /></tr></thead>
+                <thead><tr><th>ID</th><th>Name</th><th>Endpoint</th><th>Started</th><th>C / H / M</th><th>Findings</th><th>DLL / PE</th><th>Status</th><th /></tr></thead>
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.id}>
@@ -111,7 +117,7 @@ export default function Investigations() {
                       <td className="num">{fmtTime(r.started_at)}</td>
                       <td><SevChips counts={r.severity_counts} /></td>
                       <td className="num">{r.findings_count}</td>
-                      <td>{injectionState(r).findings.length ? <span className="badge sev-high">{injectionState(r).findings.length} indicators</span> : injectionState(r).modules ? <span className="badge sev-review_recommended">Telemetry</span> : <span style={{ color: "var(--dim)" }}>—</span>}</td>
+                      <td>{injectionState(r).findings.length ? <span className="badge sev-high">{injectionState(r).findings.length} indicators</span> : injectionState(r).modules || injectionState(r).peFiles ? <span className="badge sev-review_recommended">Telemetry</span> : <span style={{ color: "var(--dim)" }}>—</span>}</td>
                       <td><Pill value={r.status} /></td>
                       <td><div className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
                         <button className="btn sm" onClick={() => setEdit(r)}>Edit</button>
@@ -123,6 +129,11 @@ export default function Investigations() {
               </table>
             </div>
           )}
+        {pageData && pageData.total > 25 && <div className="panel-b row" style={{ justifyContent: "space-between" }}>
+          <button className="btn sm" disabled={!pageData.has_previous} onClick={() => applyFilters({ page: Math.max(1, page - 1) })}>Previous</button>
+          <span className="muted-copy">Showing {(pageData.page - 1) * pageData.limit + 1}–{Math.min(pageData.page * pageData.limit, pageData.total)} of {pageData.total}</span>
+          <button className="btn sm" disabled={!pageData.has_next} onClick={() => applyFilters({ page: page + 1 })}>Next</button>
+        </div>}
       </div>
       {edit && <EditCaseModal record={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); setMsg({ kind: "ok", text: "Case updated." }); reload(); }} />}
       {del && <Confirm title="Delete investigation" busy={busy} onCancel={() => setDel(null)} onConfirm={confirmDelete}

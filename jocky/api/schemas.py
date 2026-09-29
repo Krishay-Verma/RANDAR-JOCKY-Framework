@@ -9,6 +9,7 @@ MAX_SCRIPT_CHARS = 20_000
 
 class RunInvestigationRequest(BaseModel):
     script: str = Field(min_length=1, max_length=MAX_SCRIPT_CHARS)
+    network_source_id: Optional[str] = Field(default=None, max_length=100)
 
 
 class InvestigationResponse(BaseModel):
@@ -29,3 +30,8 @@ class UpdateInvestigationRequest(BaseModel):
     investigation_name: Optional[str] = Field(default=None, max_length=200)
     status: Optional[str] = Field(default=None, max_length=20)
     notes: Optional[str] = Field(default=None, max_length=10_000)
+
+
+class NetworkSourceUploadRequest(BaseModel):
+    filename: str = Field(min_length=1, max_length=255)
+    content_base64: str = Field(min_length=1, max_length=28_000_000)

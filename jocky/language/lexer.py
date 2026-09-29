@@ -47,6 +47,15 @@ class TokenType(Enum):
     # Property access
     DOT = auto()      # .
 
+    # V1.5 DSL keywords / boolean operators
+    WHERE = auto()
+    AND = auto()
+    OR = auto()
+    NOT = auto()
+    RULE = auto()
+    WHEN = auto()
+    SEVERITY = auto()
+
     # Literals
     INTEGER = auto()  # whole-number literal
 
@@ -68,6 +77,13 @@ _KEYWORDS: dict[str, TokenType] = {
     "let":  TokenType.LET,
     "if":   TokenType.IF,
     "else": TokenType.ELSE,
+    "where": TokenType.WHERE,
+    "and": TokenType.AND,
+    "or": TokenType.OR,
+    "not": TokenType.NOT,
+    "rule": TokenType.RULE,
+    "when": TokenType.WHEN,
+    "severity": TokenType.SEVERITY,
 }
 
 # ASCII digits only: str.isdigit() also accepts characters such as '\u00b2'

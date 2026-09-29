@@ -1,33 +1,34 @@
 # JOCKY DSL Reference
 
-## 1. Purpose
+**Language:** JOCKY  
+**Platform:** RANDAR  
+**Current implementation:** v1.9.2
 
-The JOCKY language is a deliberately small domain-specific language for describing forensic collection and analysis.
+JOCKY is a constrained domain-specific language for composing forensic investigations.
 
-It is **not** a general-purpose programming language and it is **not** a shell.
-
-Its job is to answer:
-
-> Which approved evidence sources should run, which approved analysis rules should consume that evidence, and what report should be produced?
+It is intentionally **not** a general-purpose programming language and **not** a shell.
 
 ---
 
-## 2. Minimal script
+## 1. Minimal script
 
 ```text
-investigation "Basic Triage" {
+investigation "Endpoint Triage" {
     collect system_info;
     collect processes;
+    collect network_connections;
+
     analyze missing_paths;
-    report "basic_triage";
+    analyze suspicious_processes;
+    analyze process_network_correlation;
+
+    report "endpoint_triage";
 }
 ```
 
 ---
 
-## 3. Statements
-
-### Investigation declaration
+## 2. Investigation declaration
 
 ```text
 investigation "Name" {
@@ -35,120 +36,192 @@ investigation "Name" {
 }
 ```
 
-### Collect
+The body contains zero or more statements.
+
+---
+
+## 3. Collect
 
 ```text
 collect processes;
 ```
 
-The name must exist in the collector registry.
+The collector name must exist in the live collector registry.
 
-### Analyze
+Unknown collectors are rejected during validation.
+
+---
+
+## 4. Analyze
 
 ```text
 analyze suspicious_processes;
 ```
 
-The name must exist in the analysis-rule registry.
+Analysis rules consume already-collected evidence.
 
-### Report
+A rule may optionally contain a condition:
 
 ```text
-report "report_name";
+analyze high_connection_processes where network_connections.count > 10;
 ```
 
-The report name is stored with the investigation result.
+The exact available properties are exposed by the backend catalog.
 
-### Variable
+---
+
+## 5. Report
 
 ```text
-let threshold = 10;
+report "windows_triage";
 ```
 
-Variables are immutable bindings within an investigation.
+The report declaration sets the requested report name in the resulting investigation.
 
-### Conditional
+---
+
+## 6. Variables
 
 ```text
-if network_connections.count > threshold {
+let connection_limit = 10;
+let expected_host = "LAB-PC";
+```
+
+Supported literal types are intentionally small:
+
+- integer;
+- string;
+- boolean.
+
+Variables can be used in conditions.
+
+---
+
+## 7. Evidence properties
+
+Evidence properties use:
+
+```text
+collector.property
+```
+
+Examples:
+
+```text
+processes.count
+network_connections.count
+system_info.hostname
+```
+
+Only properties exposed by the interpreter's allowlist are valid.
+
+---
+
+## 8. Conditions
+
+Comparison operators:
+
+```text
+>
+<
+>=
+<=
+==
+!=
+```
+
+Boolean operators:
+
+```text
+and
+or
+not
+```
+
+Example:
+
+```text
+if processes.count > 100 and network_connections.count > 20 {
     analyze high_connection_processes;
 }
 ```
 
-### Else
+---
+
+## 9. Conditional execution
 
 ```text
-if processes.count > 100 {
-    analyze suspicious_processes;
+if network_connections.count > 10 {
+    analyze high_connection_processes;
 } else {
     analyze process_network_correlation;
 }
 ```
 
----
-
-## 4. Grammar
-
-Current grammar:
-
-```text
-investigation := 'investigation' STRING '{' statement* '}'
-statement     := 'collect' IDENT ';'
-               | 'analyze' IDENT ';'
-               | 'report' STRING ';'
-               | 'let' IDENT '=' expr ';'
-               | 'if' expr op expr '{' statement* '}' ('else' '{' statement* '}')?
-op            := '>' | '<' | '>=' | '<=' | '==' | '!='
-expr          := INTEGER | STRING | 'true' | 'false' | IDENT | IDENT '.' IDENT
-```
-
-Line comments begin with `//`.
-
-Identifiers use:
-
-```text
-[a-z_][a-z0-9_]*
-```
+The parser limits nesting depth and the interpreter applies runtime limits.
 
 ---
 
-## 5. Evidence properties
+## 10. Analyst-authored rules
 
-Conditions may reference allowlisted properties.
-
-Current properties include:
+JOCKY supports a bounded rule declaration:
 
 ```text
-processes.count
-network_connections.count
-logged_in_users.count
-file_hash.count
-scheduled_tasks.count
-startup_items.count
-open_files.count
-local_users.count
-modules.count
-threads.count
-memory_regions.count
-system_info.hostname
-system_info.platform
-system_info.cpu_count
+rule "Many Connections" {
+    when network_connections.count > 20;
+    severity medium;
+}
 ```
 
-If a referenced collector was not executed or failed, the interpreter uses a safe zero/empty-style fallback for supported count properties so the condition does not crash the entire investigation.
+The rule language remains constrained to evidence expressions. It does not contain arbitrary executable code.
 
 ---
 
-## 6. Complete Windows injection example
+## 11. Boolean expression grammar
+
+Conceptually:
 
 ```text
-investigation "Windows Injection Forensics" {
+condition
+    := or_condition
+
+or_condition
+    := and_condition ("or" and_condition)*
+
+and_condition
+    := not_condition ("and" not_condition)*
+
+not_condition
+    := "not" not_condition
+     | expression comparison_operator expression
+
+comparison_operator
+    := ">" | "<" | ">=" | "<=" | "==" | "!="
+```
+
+Expressions are:
+
+```text
+integer
+string
+true
+false
+identifier
+identifier "." identifier
+```
+
+---
+
+## 12. Complete Windows example
+
+```text
+investigation "Windows Injection Review" {
     collect system_info;
     collect processes;
     collect modules;
     collect threads;
     collect memory_regions;
-    collect network_connections;
+    collect pe_metadata;
 
     analyze suspicious_module_loads;
     analyze dll_sideloading;
@@ -157,80 +230,131 @@ investigation "Windows Injection Forensics" {
     analyze thread_hijacking_indicators;
     analyze injection_correlation;
 
-    report "windows_injection_forensics";
+    report "windows_injection_review";
 }
 ```
 
 ---
 
-## 7. Safety limits
-
-The current implementation enforces limits on:
-
-- script size
-- `if` nesting depth
-- number of variables
-- integer literal length
-- known collector/rule names
-
-Malformed scripts fail during validation before endpoint collection begins.
-
----
-
-## 8. How scripts execute
+## 13. Network investigation example
 
 ```text
-Source text
-   ↓
-Tokens
-   ↓
-AST/IR dataclasses
-   ↓
-Interpreter
-   ↓
-Allowlisted collector/rule resolution
-   ↓
-Evidence + findings
+investigation "Network Threat Hunt" {
+    collect system_info;
+    collect network_artifacts;
+    collect network_connections;
+    collect processes;
+
+    analyze suspicious_dns_queries;
+    analyze dns_entropy;
+    analyze rare_domains;
+    analyze dns_tunneling_indicators;
+    analyze dns_beaconing;
+    analyze network_beaconing;
+    analyze port_scan;
+    analyze horizontal_scan;
+    analyze service_discovery;
+    analyze process_network_correlation;
+
+    report "network_threat_hunt";
+}
 ```
 
-A source script never becomes Python code and is never passed to `eval()` or a shell.
-
 ---
 
-## 9. Bytecode relationship
+## 14. Validation model
 
-The bytecode path is another representation of the same controlled investigation plan.
+JOCKY execution passes through:
 
 ```text
-JOCKY source
-    ↓
-parse
-    ↓
+Source
+  ↓
+Lexer
+  ↓
+Parser
+  ↓
 IR
-    ↓
-bytecode serialization
-    ↓
-HMAC-SHA256 signature
-    ↓
-verification
-    ↓
-IR reconstruction
-    ↓
-ordinary interpreter
+  ↓
+Semantic/capability validation
+  ↓
+Interpreter
 ```
 
-The bytecode system therefore does not grant capabilities beyond the source interpreter.
+Validation checks include:
+
+- grammar;
+- known collectors;
+- known analysis rules;
+- evidence properties;
+- variable references;
+- severity values;
+- condition structure;
+- bounded nesting.
 
 ---
 
-## 10. Design principles for future language features
+## 15. Bytecode relationship
 
-New language features should preserve:
+A valid investigation can be compiled into signed JOCKY bytecode.
 
-1. explicit capabilities;
-2. deterministic parsing;
-3. bounded resource use;
-4. no arbitrary OS command execution;
-5. inspectable IR;
-6. clear provenance;
-7. predictable failure behavior.
+Current opcode families include:
+
+```text
+COLLECT
+ANALYZE
+REPORT
+LET
+IF
+USER_RULE
+```
+
+The bytecode contains:
+
+- magic identifier;
+- format version;
+- investigation name;
+- command count;
+- opcode body;
+- HMAC-SHA256 signature.
+
+The signing key is not embedded in the bytecode.
+
+Verification occurs before disassembly or execution.
+
+Most importantly:
+
+> **Bytecode does not create a second unrestricted execution engine.**
+
+It is reconstructed into the same controlled investigation model.
+
+---
+
+## 16. Safety limits
+
+The implementation intentionally constrains:
+
+- parser nesting;
+- integer literal size;
+- bytecode operation count;
+- investigation runtime;
+- collector runtime;
+- collector output;
+- evidence volume;
+- Windows metadata traversal.
+
+These controls are part of the language/runtime design rather than optional conventions.
+
+---
+
+## 17. Design principles
+
+Future JOCKY features should preserve:
+
+1. explicit capability registration;
+2. bounded execution;
+3. deterministic semantics where practical;
+4. evidence/analysis separation;
+5. inspectability before execution;
+6. compatibility with the IR;
+7. bytecode verification;
+8. no arbitrary command execution.

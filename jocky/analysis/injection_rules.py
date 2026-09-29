@@ -241,12 +241,36 @@ def rule_injection_correlation(evidence: dict[str, Any]) -> list[Finding]:
             if pid is not None:
                 private_exec[pid] = private_exec.get(pid, 0) + 1
 
+    # V1.4 PE evidence adds static context to the runtime correlation.
+    pe_files = evidence.get("pe_metadata", {}).get("files", []) or []
+    module_by_path = {str(m.get("module_path") or "").lower(): m for m in modules}
+    pe_indicators: dict[int, list[str]] = {}
+    for pe in pe_files:
+        imports = {str(name).lower() for name in pe.get("imports", [])}
+        static_hits = imports & {
+            "writeprocessmemory", "ntwritevirtualmemory", "virtualallocex",
+            "virtualprotectex", "createremotethread", "ntcreatethreadex",
+            "queueuserapc", "setthreadcontext", "openprocess",
+        }
+        if not static_hits:
+            continue
+        module = module_by_path.get(str(pe.get("path") or "").lower())
+        pid = module.get("pid") if module else None
+        if pid is not None:
+            pe_indicators.setdefault(pid, []).append("suspicious_pe_imports")
+
     findings: list[Finding] = []
-    for pid in sorted(set(module_by_pid) & set(private_exec)):
-        indicators = [
-            "user_writable_module",
-            "private_executable_memory",
-        ]
+    candidate_pids = sorted(set(module_by_pid) & (set(private_exec) | set(pe_indicators)))
+    for pid in candidate_pids:
+        indicators = []
+        if pid in module_by_pid:
+            indicators.append("user_writable_module")
+        if pid in private_exec:
+            indicators.append("private_executable_memory")
+        if pid in pe_indicators:
+            indicators.extend(pe_indicators[pid])
+        if len(indicators) < 2:
+            continue
         findings.append(Finding(
             rule_name="injection_correlation",
             severity=SEVERITY_HIGH,
@@ -260,7 +284,8 @@ def rule_injection_correlation(evidence: dict[str, Any]) -> list[Finding]:
                 "pid": pid,
                 "indicators": indicators,
                 "user_writable_module_count": module_by_pid[pid],
-                "private_executable_region_count": private_exec[pid],
+                "private_executable_region_count": private_exec.get(pid, 0),
+                "pe_static_indicators": pe_indicators.get(pid, []),
                 "platform": "Windows",
             },
         ))

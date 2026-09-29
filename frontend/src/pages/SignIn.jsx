@@ -19,7 +19,7 @@ export default function SignIn() {
     const candidate = value.trim();
     setError("");
     if (!isValidTokenFormat(candidate)) {
-      setError("That does not look like a JOCKY token (letters, digits, - and _ only).");
+      setError("That does not look like a RANDAR token (letters, digits, - and _ only).");
       return;
     }
     setBusy(true);
@@ -42,7 +42,7 @@ export default function SignIn() {
       <form className="card" onSubmit={submit}>
         <div className="brand">
           <div className="brand-mark">J</div>
-          <div><b>JOCKY</b><small>Forensic triage console</small></div>
+          <div><b>RANDAR</b><small>Forensic triage console</small></div>
         </div>
         <h2 style={{ fontSize: 18, marginBottom: 4 }}>Sign in</h2>
         <p style={{ color: "var(--mute)", marginTop: 0 }}>Enter the API token generated during setup.</p>
