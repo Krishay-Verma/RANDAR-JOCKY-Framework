@@ -47,6 +47,11 @@ export const RULE_LABEL = {
   high_entropy_module: "High-entropy PE module",
   module_disk_mismatch: "Module / disk mismatch",
   suspicious_writable_module: "Suspicious writable module",
+  memory_forensics_correlation: "Memory forensics correlation",
+  driver_forensics_exposure: "Driver forensics exposure",
+  byovd_driver_indicators: "Vulnerable-driver exposure",
+  persistence_cross_surface_correlation: "Persistence cross-surface correlation",
+  persistence_privilege_correlation: "Persistence / privilege correlation",
 };
 
 export function humanizeRule(name) {
@@ -73,6 +78,7 @@ export const COLLECTOR_LABEL = {
   windows_event_logs: "Windows Event Logs",
   sysmon_events: "Sysmon events",
   services: "Windows services",
+  driver_inventory: "Driver inventory",
 };
 
 export function humanizeCollector(name) {
@@ -159,6 +165,81 @@ export const TEMPLATES = {
     report "windows_injection_forensics";
 }
 `,
+  "Memory forensics": `investigation "Memory Forensics" {
+    collect system_info;
+    collect processes;
+    collect modules;
+    collect threads;
+    collect memory_regions;
+    analyze process_hollowing_indicators;
+    analyze reflective_load_indicators;
+    analyze thread_hijacking_indicators;
+    analyze injection_correlation;
+    analyze in_memory_execution_indicators;
+    analyze memory_forensics_correlation;
+    report "memory_forensics";
+}
+`,
+  "Driver forensics": `investigation "Driver Forensics" {
+    collect system_info;
+    collect driver_inventory;
+    collect windows_event_logs;
+    collect sysmon_events;
+    analyze byovd_driver_indicators;
+    analyze driver_forensics_exposure;
+    report "driver_forensics";
+}
+`,
+  "Security software & kernel review": `investigation "Security Software & Kernel Review" {
+    collect system_info;
+    collect processes;
+    collect modules;
+    collect driver_inventory;
+    collect services;
+    analyze suspicious_services;
+    analyze unsigned_loaded_module;
+    analyze driver_forensics_exposure;
+    report "security_software_kernel_review";
+}
+`,
+  "Deep Windows persistence": `investigation "Deep Windows Persistence" {
+    collect system_info;
+    collect processes;
+    collect services;
+    collect scheduled_tasks;
+    collect startup_items;
+    collect windows_event_logs;
+    collect wmi_event_subscriptions;
+    collect ifeo_persistence;
+    collect winlogon_persistence;
+    collect appinit_persistence;
+    collect com_hijack_persistence;
+    collect bits_persistence;
+    collect all_users_startup;
+    collect browser_extensions;
+    collect office_addins;
+    collect lsa_auth_packages;
+
+    analyze unusual_scheduled_tasks;
+    analyze suspicious_startup_items;
+    analyze suspicious_services;
+    analyze writable_service_paths;
+    analyze service_configuration_anomalies;
+    analyze persistence_correlation;
+    analyze persistence_cross_surface_correlation;
+    analyze wmi_event_subscription;
+    analyze ifeo_debugger;
+    analyze winlogon_persistence;
+    analyze appinit_dlls;
+    analyze com_hijack;
+    analyze bits_persistence;
+    analyze all_users_startup;
+    analyze browser_extensions;
+    analyze office_addins;
+    analyze lsa_auth_packages;
+    report "deep_windows_persistence";
+}
+`,
   "Windows telemetry hunt": `investigation "Windows Telemetry Hunt" {
     collect system_info;
     collect processes;
@@ -176,6 +257,8 @@ export const TEMPLATES = {
     analyze suspicious_services;
     analyze writable_service_paths;
     analyze persistence_correlation;
+    analyze persistence_cross_surface_correlation;
+    analyze persistence_privilege_correlation;
 
     report "windows_telemetry_hunt";
 }
@@ -229,6 +312,21 @@ export const TEMPLATES = {
     collect modules;
     collect threads;
     collect memory_regions;
+    collect driver_inventory;
+    collect wmi_event_subscriptions;
+    collect ifeo_persistence;
+    collect winlogon_persistence;
+    collect appinit_persistence;
+    collect com_hijack_persistence;
+    collect bits_persistence;
+    collect all_users_startup;
+    collect browser_extensions;
+    collect office_addins;
+    collect lsa_auth_packages;
+    collect advanced_persistence;
+    collect clipboard_metadata;
+    collect browser_history_metadata;
+    collect browser_cookie_metadata;
 
     analyze missing_paths;
     analyze suspicious_processes;
@@ -265,11 +363,17 @@ export const TEMPLATES = {
     analyze suspicious_services;
     analyze writable_service_paths;
     analyze persistence_correlation;
+    analyze persistence_cross_surface_correlation;
+    analyze persistence_privilege_correlation;
     analyze unsigned_loaded_module;
     analyze suspicious_imports;
     analyze high_entropy_module;
     analyze module_disk_mismatch;
     analyze suspicious_writable_module;
+    analyze in_memory_execution_indicators;
+    analyze byovd_driver_indicators;
+    analyze memory_forensics_correlation;
+    analyze driver_forensics_exposure;
 
     report "domain_expansion_triage";
 }

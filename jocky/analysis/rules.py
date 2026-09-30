@@ -27,28 +27,16 @@ _UNUSUAL_DIR_MARKERS = [
 
 
 def rule_missing_executable_path(collector_results: dict) -> list[Finding]:
-    """
-    Flag processes where the executable path could not be determined.
-
-    This is common and often benign (protected system processes), so
-    it's purely informational - not "review recommended".
-    """
-    findings = []
     processes = collector_results.get("processes", {}).get("processes", [])
-
-    for proc in processes:
-        if proc.get("exe_path") is None:
-            findings.append(Finding(
-                rule_name="missing_executable_path",
-                severity=SEVERITY_INFO,
-                summary=f"Executable path unavailable for PID {proc.get('pid')}",
-                reason=(
-                    "The process's executable path could not be read, typically "
-                    "due to OS permission restrictions on protected processes."
-                ),
-                related_evidence={"pid": proc.get("pid"), "name": proc.get("name")},
-            ))
-    return findings
+    missing = [p for p in processes if p.get("exe_path") is None]
+    if not missing:
+        return []
+    return [Finding(
+        rule_name="missing_executable_path", severity=SEVERITY_INFO,
+        summary=f"Executable path unavailable for {len(missing)} process(es)",
+        reason="Some process executable paths could not be read, typically because Windows protected-process or cross-user access restrictions blocked the field. The count is aggregated to avoid one finding per process.",
+        related_evidence={"missing_count": len(missing), "sample_pids": [p.get("pid") for p in missing[:20]]},
+    )]
 
 
 def rule_unusual_executable_directory(collector_results: dict) -> list[Finding]:
@@ -85,38 +73,26 @@ def rule_unusual_executable_directory(collector_results: dict) -> list[Finding]:
 
 
 def rule_process_network_correlation(collector_results: dict) -> list[Finding]:
-    """
-    Correlate processes with active network connections, surfacing
-    which running programs currently hold open connections.
-
-    Informational: simply links two evidence types together so an
-    investigator doesn't have to cross-reference PIDs by hand.
-    """
-    findings = []
-    processes = {
-        p["pid"]: p
-        for p in collector_results.get("processes", {}).get("processes", [])
-        if p.get("pid") is not None
-    }
+    processes = {p.get("pid"): p for p in collector_results.get("processes", {}).get("processes", []) if p.get("pid") is not None}
     connections = collector_results.get("network_connections", {}).get("connections", [])
-
+    by_pid: dict[int, int] = {}
+    destinations: dict[int, list[str]] = {}
     for conn in connections:
         pid = conn.get("pid")
-        if pid is None or pid == 0 or pid not in processes:
+        if pid is None or pid == 0 or pid not in processes or not conn.get("remote_address"):
             continue
-        if conn.get("remote_address") is None:
-            continue  # only report connections that actually reach somewhere
+        by_pid[pid] = by_pid.get(pid, 0) + 1
+        destinations.setdefault(pid, []).append(str(conn.get("remote_address")))
+    findings = []
+    # Correlation is context, not a finding for every socket. Cap the output to
+    # the ten most connected processes so a normal browser cannot flood a case.
+    for pid, count in sorted(by_pid.items(), key=lambda x: (-x[1], x[0]))[:10]:
         proc = processes[pid]
         findings.append(Finding(
-            rule_name="process_network_correlation",
-            severity=SEVERITY_INFO,
-            summary=f"Process '{proc.get('name')}' (PID {pid}) has an active remote connection",
-            reason="Linking process evidence to network evidence for investigator context.",
-            related_evidence={
-                "pid": pid,
-                "process_name": proc.get("name"),
-                "remote_address": conn.get("remote_address"),
-                "status": conn.get("status"),
-            },
+            rule_name="process_network_correlation", severity=SEVERITY_INFO,
+            summary=f"Process '{proc.get('name')}' (PID {pid}) has {count} active remote connection(s)",
+            reason="Aggregated process/network context for the highest-connection processes. Individual sockets remain available in the network evidence collector.",
+            related_evidence={"pid": pid, "process_name": proc.get("name"), "connection_count": count, "remote_addresses": sorted(set(destinations.get(pid, [])))[:25]},
         ))
     return findings
+

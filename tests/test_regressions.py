@@ -4,6 +4,7 @@ import hashlib
 import os
 import tempfile
 import time
+import warnings
 
 import pytest
 
@@ -58,6 +59,30 @@ def test_quoted_trusted_startup_path_not_flagged():
         "name": "x", "type": "registry_run_key",
         "command": '"C:\\Program Files\\App\\app.exe" --tray'}]}}
     assert check_suspicious_startup_items(ev) == []
+
+
+def test_pe_pkcs7_recovery_warning_is_suppressed(monkeypatch, tmp_path):
+    from jocky.collectors import pe_metadata
+
+    class FakePkcs7:
+        @staticmethod
+        def load_der_pkcs7_certificates(payload):
+            warnings.warn(
+                "PKCS#7 certificates could not be parsed as DER, falling back to parsing as BER.",
+                UserWarning,
+            )
+            return []
+
+    monkeypatch.setattr(pe_metadata, "pkcs7", FakePkcs7)
+    cert = tmp_path / "signed.bin"
+    # WIN_CERTIFICATE header: length=8, revision=0x0200, type=0x0002.
+    cert.write_bytes(b"X" + (9).to_bytes(4, "little") + (0x0200).to_bytes(2, "little") + (2).to_bytes(2, "little"))
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with cert.open("rb") as handle:
+            result = pe_metadata._parse_certificate(handle, 9, (1, 8))
+    assert result["status"] == "embedded_signature"
+    assert not any("PKCS#7 certificates could not be parsed as DER" in str(w.message) for w in caught)
 
 
 # ── API ───────────────────────────────────────────────────────────────────────
@@ -233,6 +258,9 @@ def test_all_v1_analysis_rules_are_registered_and_callable():
         "suspicious_module_loads", "dll_sideloading",
         "process_hollowing_indicators", "reflective_load_indicators",
         "thread_hijacking_indicators", "injection_correlation",
+        "in_memory_execution_indicators", "byovd_driver_indicators",
+            "driver_forensics_exposure",
+            "memory_forensics_correlation",
         "suspicious_dns_queries", "dns_entropy", "rare_domains",
         "suspicious_tld_patterns", "dns_bursts", "unusual_query_types",
         "long_random_labels", "dns_tunneling_indicators", "dns_beaconing",
@@ -241,8 +269,12 @@ def test_all_v1_analysis_rules_are_registered_and_callable():
         "encoded_powershell", "suspicious_powershell_parent",
         "powershell_network_activity", "powershell_child_processes",
         "suspicious_services", "writable_service_paths", "persistence_correlation",
+        "persistence_cross_surface_correlation", "persistence_privilege_correlation",
         "unsigned_loaded_module", "suspicious_imports", "high_entropy_module",
         "module_disk_mismatch", "suspicious_writable_module",
+        "wmi_event_subscription", "ifeo_debugger", "winlogon_persistence",
+        "appinit_dlls", "com_hijack", "bits_persistence", "all_users_startup",
+        "browser_extensions", "office_addins", "lsa_auth_packages", "service_configuration_anomalies",
     }
     assert set(list_rules()) == expected
     evidence = {
@@ -1192,7 +1224,7 @@ def test_v16_report_provenance_and_finding_references(client):
     report = r.json()["report_json"]
     assert report["product_name"] == "RANDAR"
     assert report["dsl_name"] == "JOCKY"
-    assert report["product_version"] == "1.9.2"
+    assert report["product_version"] == "3.0.0"
     assert report["script_hash"]
     assert all((c.get("evidence_hash") if c.get("status") == "success" else True) for c in report["collector_results"])
     assert "timeline" in report
@@ -1354,7 +1386,7 @@ def test_v18_findings_have_explanation_fields_and_integrity(client):
     r = client.post('/api/investigations', json={'script': src}, headers=AUTH)
     assert r.status_code == 200, r.text
     report = r.json()['report_json']
-    assert report['integrity_version'] == 4
+    assert report['integrity_version'] == 6
     for finding in report['findings']:
         assert finding['limitations']
         assert finding['next_check']
@@ -1523,7 +1555,7 @@ def test_v19_report_resource_accounting_and_integrity(client):
     r = client.post('/api/investigations', json={'script': src}, headers=AUTH)
     assert r.status_code == 200
     report = r.json()['report_json']
-    assert report['integrity_version'] == 4
+    assert report['integrity_version'] == 6
     assert report['execution_status'] == 'complete'
     assert report['resource_usage']['collector_count'] >= 1
     collector = report['collector_results'][0]

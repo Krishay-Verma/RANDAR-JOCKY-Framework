@@ -1,34 +1,26 @@
-# RANDAR Framework v1.9.2
+# RANDAR v3.0.0 Final
 
-V1.9.2 is a comprehensive reliability patch over V1.9.1. It addresses intermittent client-side route errors, stale request races, background-run cancellation races, unexpected API response shapes, and routine Windows telemetry timeouts.
+RANDAR v3.0.0 is the final integrated forensic release built from the V2.9 persistence-hardening baseline.
 
-## Reliability fixes
+## Scope
 
-- Route-bound data requests now use AbortController cancellation.
-- Navigation/unmount cancels obsolete requests instead of allowing stale responses to race the new page.
-- Repeated polling aborts the previous request before starting the next one.
-- Investigation cancellation has one status-poll owner; the Cancel action no longer starts a competing poll loop.
-- Queued/running/cancelling/terminal states are handled as one deterministic lifecycle.
-- API list responses are normalized before `.map()`/`.filter()`/`.find()` operations.
-- Modal/evidence callbacks are type-checked before invocation.
+- JOCKY v1.5 investigation DSL and signed bytecode/toolchain
+- Transformation and reproducibility metadata
+- Windows/Linux forensic collectors and network evidence
+- Memory and driver forensic detection
+- Persistence-forensics hardening and expanded Windows persistence coverage
+- Deterministic finding IDs and collector evidence hashes
+- Report integrity, coverage/elevation honesty, and forensic timeline
+- Software/security-product context and kernel-component evidence
+- Privacy-bounded clipboard metadata and browser history/cookie metadata
 
-## Windows execution reliability
+## Safety boundary
 
-- Generic collector bound: 45 seconds.
-- Modules / threads / memory regions: 90 seconds.
-- Windows Event Logs / Sysmon: 90 seconds.
-- PE metadata: 120 seconds.
-- Maximum investigation runtime: 600 seconds.
-
-These remain hard bounds. A timeout is recorded as a collector-level timeout and does not discard unrelated evidence.
+RANDAR is a read-only forensic and research platform. It does not implement security-control bypass, vulnerable-driver exploitation, kernel subversion, stealth injection, process hollowing, reflective injection, API unhooking, or covert transport/domain-fronting behavior. Those SIH26148 topics are represented as defensive detection/research boundaries in the documentation.
 
 ## Verification
 
-- Full backend regression suite: **91 passing**
-- API route duplicate scan: passed
-- Python compileall: passed
-- Frontend production build: source was updated and the project owner can verify it with `npm ci && npm run build`; this container cannot independently reproduce npm installation because registry package transport is unavailable.
-
-## Product boundary
-
-RANDAR remains a defensive forensic triage platform. JOCKY remains the controlled Forensics-as-Code DSL. No offensive capabilities were added.
+- Regression tests: **165 passed, 0 failed**
+- Python compilation: passed
+- Release ZIP integrity: verified
+- Frontend production Vite build: not claimed in this environment because dependency retrieval is unavailable.

@@ -1,0 +1,16 @@
+investigation "V2.0 Authorized Research Lab" {
+  collect processes;
+  collect modules;
+  collect threads;
+  collect memory_regions;
+  collect driver_inventory;
+
+  analyze in_memory_execution_indicators;
+  analyze byovd_driver_indicators;
+  analyze process_hollowing_indicators;
+  analyze reflective_load_indicators;
+  analyze thread_hijacking_indicators;
+  analyze injection_correlation;
+
+  report "v2.0 authorized lab observations";
+}

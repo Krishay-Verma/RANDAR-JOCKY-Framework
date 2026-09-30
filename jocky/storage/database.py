@@ -34,6 +34,60 @@ _COLUMNS = (
     "findings_count, status, notes, severity_counts, updated_at"
 )
 
+# Lightweight JSON1 projections used by the investigations list. The full
+# report body remains excluded from list responses; these fields expose only
+# whether the specialized V2.4/V2.5 evidence surfaces were collected and how
+# many related findings they produced.
+_SUMMARY_FORENSICS_COLUMNS = f"""
+    CASE WHEN EXISTS (
+        SELECT 1 FROM json_each(investigations.report_json, '$.collector_results') c
+        WHERE json_extract(c.value, '$.target') = 'memory_regions'
+    ) THEN 1 ELSE 0 END AS memory_forensics_collected,
+    (SELECT COUNT(*) FROM json_each(investigations.report_json, '$.findings') f
+        WHERE json_extract(f.value, '$.rule_name') IN (
+            'process_hollowing_indicators', 'reflective_load_indicators',
+            'thread_hijacking_indicators', 'injection_correlation',
+            'in_memory_execution_indicators', 'memory_forensics_correlation'
+        )) AS memory_forensics_findings,
+    CASE WHEN EXISTS (
+        SELECT 1 FROM json_each(investigations.report_json, '$.collector_results') c
+        WHERE json_extract(c.value, '$.target') = 'driver_inventory'
+    ) THEN 1 ELSE 0 END AS driver_forensics_collected,
+    (SELECT COUNT(*) FROM json_each(investigations.report_json, '$.findings') f
+        WHERE json_extract(f.value, '$.rule_name') IN (
+            'byovd_driver_indicators', 'driver_forensics_exposure'
+        )) AS driver_forensics_findings,
+    COALESCE((SELECT json_extract(c.value, '$.data.count')
+        FROM json_each(investigations.report_json, '$.collector_results') c
+        WHERE json_extract(c.value, '$.target') = 'memory_regions' LIMIT 1), 0) AS memory_forensics_records,
+    COALESCE((SELECT json_extract(c.value, '$.data.count')
+        FROM json_each(investigations.report_json, '$.collector_results') c
+        WHERE json_extract(c.value, '$.target') = 'driver_inventory' LIMIT 1), 0) AS driver_forensics_records,
+    CASE WHEN EXISTS (
+        SELECT 1 FROM json_each(investigations.report_json, '$.collector_results') c
+        WHERE json_extract(c.value, '$.target') IN ('startup_items','scheduled_tasks','services','local_users','logged_in_users')
+    ) THEN 1 ELSE 0 END AS persistence_forensics_collected,
+    (SELECT COUNT(*) FROM json_each(investigations.report_json, '$.findings') f
+        WHERE json_extract(f.value, '$.rule_name') IN (
+            'unusual_scheduled_tasks','suspicious_startup_items','privileged_user_anomaly',
+            'suspicious_services','writable_service_paths','persistence_correlation',
+            'persistence_cross_surface_correlation','persistence_privilege_correlation'
+        )) AS persistence_forensics_findings,
+    (SELECT COUNT(*) FROM json_each(investigations.report_json, '$.findings') f
+        WHERE json_extract(f.value, '$.rule_name') IN (
+            'suspicious_module_loads', 'dll_sideloading', 'process_hollowing_indicators',
+            'reflective_load_indicators', 'thread_hijacking_indicators', 'injection_correlation',
+            'unsigned_loaded_module', 'suspicious_imports', 'high_entropy_module',
+            'module_disk_mismatch', 'suspicious_writable_module'
+        )) AS injection_forensics_findings,
+    COALESCE((SELECT json_extract(c.value, '$.data.count')
+        FROM json_each(investigations.report_json, '$.collector_results') c
+        WHERE json_extract(c.value, '$.target') = 'modules' LIMIT 1), 0) AS module_records,
+    COALESCE((SELECT json_extract(c.value, '$.data.count')
+        FROM json_each(investigations.report_json, '$.collector_results') c
+        WHERE json_extract(c.value, '$.target') = 'pe_metadata' LIMIT 1), 0) AS pe_records
+"""
+
 
 def get_connection() -> sqlite3.Connection:
     _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -132,7 +186,7 @@ def list_investigations() -> list[dict]:
     conn = get_connection()
     try:
         rows = conn.execute(
-            f"SELECT {_COLUMNS} FROM investigations ORDER BY id DESC"
+            f"SELECT {_COLUMNS}, {_SUMMARY_FORENSICS_COLUMNS} FROM investigations ORDER BY id DESC"
         ).fetchall()
         return [_row_to_summary(r) for r in rows]
     finally:
@@ -357,7 +411,7 @@ def list_investigations_page(page: int = 1, limit: int = 25, query: str = "", st
     try:
         total = conn.execute(f"SELECT COUNT(*) AS n FROM investigations{clause}", params).fetchone()["n"]
         rows = conn.execute(
-            f"SELECT {_COLUMNS} FROM investigations{clause} ORDER BY {order} LIMIT ? OFFSET ?",
+            f"SELECT {_COLUMNS}, {_SUMMARY_FORENSICS_COLUMNS} FROM investigations{clause} ORDER BY {order} LIMIT ? OFFSET ?",
             [*params, limit, offset],
         ).fetchall()
     finally:
@@ -444,3 +498,85 @@ def get_stats() -> dict:
         "hosts": [{"host": k, "count": v} for k, v in hosts.most_common(6)],
         "recent": list(reversed(timeline)),
     }
+
+# ── V2.2 transformation experiments ─────────────────────────────────────────
+
+def init_transformation_experiments() -> None:
+    conn = get_connection()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS transformation_experiments (
+                experiment_id TEXT PRIMARY KEY,
+                experiment_version TEXT NOT NULL,
+                source_hash TEXT NOT NULL,
+                ir_hash TEXT NOT NULL,
+                transformation_profile TEXT NOT NULL,
+                transformation_seed TEXT,
+                compiler_version TEXT NOT NULL,
+                input_artifact_hash TEXT NOT NULL,
+                output_artifact_hash TEXT NOT NULL,
+                transformation_id TEXT NOT NULL,
+                validation TEXT NOT NULL,
+                semantic_equivalent INTEGER NOT NULL,
+                output_size_bytes INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def save_transformation_experiment(record: dict) -> str:
+    conn = get_connection()
+    try:
+        conn.execute("""
+            INSERT OR REPLACE INTO transformation_experiments
+            (experiment_id, experiment_version, source_hash, ir_hash,
+             transformation_profile, transformation_seed, compiler_version,
+             input_artifact_hash, output_artifact_hash, transformation_id,
+             validation, semantic_equivalent, output_size_bytes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, tuple(record[k] for k in (
+            "experiment_id", "experiment_version", "source_hash", "ir_hash",
+            "transformation_profile", "transformation_seed", "compiler_version",
+            "input_artifact_hash", "output_artifact_hash", "transformation_id",
+            "validation", "semantic_equivalent", "output_size_bytes", "created_at")))
+        conn.commit()
+        return record["experiment_id"]
+    finally:
+        conn.close()
+
+
+def list_transformation_experiments(limit: int = 100) -> list[dict]:
+    limit = min(max(int(limit), 1), 500)
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM transformation_experiments ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        result=[]
+        for row in rows:
+            item=dict(row)
+            item["semantic_equivalent"] = bool(item["semantic_equivalent"])
+            result.append(item)
+        return result
+    finally:
+        conn.close()
+
+
+def transformation_experiment_summary() -> dict:
+    conn = get_connection()
+    try:
+        row = conn.execute("""
+            SELECT COUNT(*) AS total,
+                   SUM(CASE WHEN validation = 'passed' THEN 1 ELSE 0 END) AS passed,
+                   SUM(CASE WHEN validation <> 'passed' THEN 1 ELSE 0 END) AS failed
+            FROM transformation_experiments
+        """).fetchone()
+        profiles = conn.execute(
+            "SELECT transformation_profile, COUNT(*) AS count FROM transformation_experiments GROUP BY transformation_profile ORDER BY transformation_profile"
+        ).fetchall()
+        return {"total": row["total"] or 0, "passed": row["passed"] or 0, "failed": row["failed"] or 0, "profiles": {r["transformation_profile"]: r["count"] for r in profiles}}
+    finally:
+        conn.close()

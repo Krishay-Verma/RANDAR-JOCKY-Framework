@@ -13,11 +13,34 @@ const INJECTION_RULES = new Set([
   "module_disk_mismatch", "suspicious_writable_module",
 ]);
 function injectionState(record) {
-  const report = record?.report_json;
-  const findings = (report?.findings || []).filter((f) => INJECTION_RULES.has(f.rule_name));
-  const modules = report?.collector_results?.find((c) => c.target === "modules")?.data?.count || 0;
-  const peFiles = report?.collector_results?.find((c) => c.target === "pe_metadata")?.data?.count || 0;
-  return { findings, modules, peFiles };
+  return {
+    findings: Number(record?.injection_forensics_findings || 0),
+    modules: Number(record?.module_records || 0),
+    peFiles: Number(record?.pe_records || 0),
+  };
+}
+
+const MEMORY_RULES = new Set([
+  "process_hollowing_indicators", "reflective_load_indicators", "thread_hijacking_indicators",
+  "injection_correlation", "in_memory_execution_indicators", "memory_forensics_correlation",
+]);
+const DRIVER_RULES = new Set(["byovd_driver_indicators", "driver_forensics_exposure"]);
+const PERSISTENCE_RULES = new Set(["unusual_scheduled_tasks", "suspicious_startup_items", "privileged_user_anomaly", "persistence_correlation", "suspicious_services", "writable_service_paths", "persistence_cross_surface_correlation", "persistence_privilege_correlation"]);
+function specializedForensics(record) {
+  return {
+    memory: {
+      collected: Boolean(record?.memory_forensics_collected),
+      count: Number(record?.memory_forensics_findings || 0),
+    },
+    driver: {
+      collected: Boolean(record?.driver_forensics_collected),
+      count: Number(record?.driver_forensics_findings || 0),
+    },
+    persistence: {
+      collected: Boolean(record?.persistence_forensics_collected),
+      count: Number(record?.persistence_forensics_findings || 0),
+    },
+  };
 }
 
 export function EditCaseModal({ record, onClose, onSaved }) {
@@ -107,7 +130,7 @@ export default function Investigations() {
           rows.length === 0 ? <Empty title={pageData?.total ? "No matches" : "No investigations yet"}>{pageData?.total ? "Adjust the filters." : "Run an investigation to see it here."}</Empty> : (
             <div className="tbl-wrap">
               <table className="t">
-                <thead><tr><th>ID</th><th>Name</th><th>Endpoint</th><th>Started</th><th>C / H / M</th><th>Findings</th><th>DLL / PE</th><th>Status</th><th /></tr></thead>
+                <thead><tr><th>ID</th><th>Name</th><th>Endpoint</th><th>Started</th><th>C / H / M</th><th>Findings</th><th>Forensics</th><th>DLL / PE</th><th>Memory</th><th>Drivers</th><th>Persistence</th><th>Status</th><th /></tr></thead>
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.id}>
@@ -117,7 +140,16 @@ export default function Investigations() {
                       <td className="num">{fmtTime(r.started_at)}</td>
                       <td><SevChips counts={r.severity_counts} /></td>
                       <td className="num">{r.findings_count}</td>
-                      <td>{injectionState(r).findings.length ? <span className="badge sev-high">{injectionState(r).findings.length} indicators</span> : injectionState(r).modules || injectionState(r).peFiles ? <span className="badge sev-review_recommended">Telemetry</span> : <span style={{ color: "var(--dim)" }}>—</span>}</td>
+                      <td><div className="forensics-list-links">
+                        {specializedForensics(r).memory.collected && <Link className="forensics-link" to={`/investigations/${r.id}?tab=memory`}>Memory</Link>}
+                        {specializedForensics(r).driver.collected && <Link className="forensics-link" to={`/investigations/${r.id}?tab=driver`}>Driver</Link>}
+                        {specializedForensics(r).persistence.collected && <Link className="forensics-link" to={`/investigations/${r.id}?tab=persistence`}>Persistence</Link>}
+                        {!specializedForensics(r).memory.collected && !specializedForensics(r).driver.collected && !specializedForensics(r).persistence.collected && <span style={{ color: "var(--dim)" }}>—</span>}
+                      </div></td>
+                      <td>{injectionState(r).findings ? <span className="badge sev-high">{injectionState(r).findings} indicators</span> : injectionState(r).modules || injectionState(r).peFiles ? <span className="badge sev-review_recommended">Telemetry</span> : <span style={{ color: "var(--dim)" }}>—</span>}</td>
+                      <td>{(() => { const x = specializedForensics(r).memory; return x.collected ? <span className={`badge ${x.count ? "sev-high" : "sev-review_recommended"}`}>{x.count ? `${x.count} indicators` : `${Number(r?.memory_forensics_records || 0)} regions`}</span> : <span style={{ color: "var(--dim)" }}>—</span>; })()}</td>
+                      <td>{(() => { const x = specializedForensics(r).driver; return x.collected ? <span className={`badge ${x.count ? "sev-high" : "sev-review_recommended"}`}>{x.count ? `${x.count} indicators` : `${Number(r?.driver_forensics_records || 0)} drivers`}</span> : <span style={{ color: "var(--dim)" }}>—</span>; })()}</td>
+                      <td>{(() => { const x = specializedForensics(r).persistence; return x.collected ? <span className={`badge ${x.count ? "sev-high" : "sev-review_recommended"}`}>{x.count ? `${x.count} indicators` : "Collected"}</span> : <span style={{ color: "var(--dim)" }}>—</span>; })()}</td>
                       <td><Pill value={r.status} /></td>
                       <td><div className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
                         <button className="btn sm" onClick={() => setEdit(r)}>Edit</button>

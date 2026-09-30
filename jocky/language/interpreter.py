@@ -34,6 +34,7 @@ from jocky.language.ir import (
 from jocky.collectors.registry import get_collector, is_known_collector
 from jocky.analysis.registry import get_rule, is_known_rule
 from jocky.analysis.finding import Finding
+from jocky.analysis.dedup import deduplicate_findings
 
 
 class InterpreterError(Exception):
@@ -103,6 +104,10 @@ _COLLECTOR_TIMEOUTS = {
     "pe_metadata": 120.0,
     "windows_event_logs": 90.0,
     "sysmon_events": 90.0,
+    "driver_inventory": 180.0,
+    "services": 90.0,
+    "scheduled_tasks": 90.0,
+    "local_users": 60.0,
 }
 MAX_INVESTIGATION_RUNTIME_SECONDS = 600.0
 MAX_RECORDS_PER_COLLECTOR = 10_000
@@ -134,10 +139,25 @@ _EVIDENCE_PROPS: dict[tuple[str, str], Callable[[dict], Any]] = {
     ("modules",             "count"):     lambda d: d.get("count", 0),
     ("threads",             "count"):     lambda d: d.get("count", 0),
     ("memory_regions",      "count"):     lambda d: d.get("count", 0),
+    ("driver_inventory",    "count"):     lambda d: d.get("count", 0),
     ("windows_event_logs", "count"):     lambda d: d.get("count", 0),
     ("sysmon_events",      "count"):     lambda d: d.get("count", 0),
     ("services",           "count"):     lambda d: d.get("count", 0),
     ("pe_metadata",        "count"):     lambda d: d.get("count", 0),
+    ("wmi_event_subscriptions", "count"): lambda d: d.get("count", 0),
+    ("ifeo_persistence", "count"): lambda d: d.get("count", 0),
+    ("winlogon_persistence", "count"): lambda d: d.get("count", 0),
+    ("appinit_persistence", "count"): lambda d: d.get("count", 0),
+    ("com_hijack_persistence", "count"): lambda d: d.get("count", 0),
+    ("bits_persistence", "count"): lambda d: d.get("count", 0),
+    ("all_users_startup", "count"): lambda d: d.get("count", 0),
+    ("browser_extensions", "count"): lambda d: d.get("count", 0),
+    ("office_addins", "count"): lambda d: d.get("count", 0),
+    ("lsa_auth_packages", "count"): lambda d: d.get("count", 0),
+    ("advanced_persistence", "count"): lambda d: d.get("count", 0),
+    ("clipboard_metadata", "count"): lambda d: d.get("count", 0),
+    ("browser_history_metadata", "count"): lambda d: d.get("count", 0),
+    ("browser_cookie_metadata", "count"): lambda d: d.get("count", 0),
 }
 
 _ALLOWED_PROPS_STR = ", ".join(
@@ -434,7 +454,7 @@ def _run_analyze(command: AnalyzeCommand, result: InvestigationResult, variables
         new_findings = rule_fn(_build_evidence(result))
         if command.where is not None:
             new_findings = [f for f in new_findings if _eval_finding_condition(command.where, f, variables)]
-        result.findings.extend(new_findings)
+        result.findings = deduplicate_findings(result.findings + new_findings)
         result.analysis_results.append(AnalysisResult(
             target=command.rule,
             status="success",

@@ -121,7 +121,7 @@ def rule_powershell_child_processes(evidence: dict[str, Any]) -> list[Finding]:
 def rule_suspicious_services(evidence: dict[str, Any]) -> list[Finding]:
     findings: list[Finding] = []
     for service in evidence.get("services", {}).get("services", []):
-        if not service.get("writable_path"):
+        if service.get("writable_path") is not True:
             continue
         findings.append(Finding(
             "suspicious_services", SEVERITY_REVIEW,
@@ -135,7 +135,7 @@ def rule_suspicious_services(evidence: dict[str, Any]) -> list[Finding]:
 def rule_writable_service_paths(evidence: dict[str, Any]) -> list[Finding]:
     findings: list[Finding] = []
     for service in evidence.get("services", {}).get("services", []):
-        if service.get("writable_path"):
+        if service.get("writable_path") is True:
             findings.append(Finding(
                 "writable_service_paths", SEVERITY_MEDIUM,
                 f"Writable service executable path: {service.get('service_name')}",
@@ -175,4 +175,26 @@ def rule_persistence_correlation(evidence: dict[str, Any]) -> list[Finding]:
             "A common executable path was observed in more than one of the collected startup, scheduled-task and service datasets. Registry Run keys are represented within startup_items.",
             {"path": path, "surfaces": unique},
         ))
+    return findings
+
+
+def rule_service_configuration_anomalies(evidence: dict[str, Any]) -> list[Finding]:
+    findings = []
+    for service in evidence.get("services", {}).get("services", []):
+        if service.get("unquoted_path"):
+            findings.append(Finding(
+                "service_configuration_anomalies", SEVERITY_MEDIUM,
+                f"Service '{service.get('service_name')}' has an unquoted executable path",
+                "The service ImagePath contains spaces but is not quoted, creating ambiguous executable resolution. Validate the exact path and ACLs.",
+                {"service_name": service.get("service_name"), "executable": service.get("executable"), "command_line": service.get("command_line"), "unquoted_path": True},
+            ))
+        if service.get("service_dll"):
+            verification = service.get("service_dll_verification") or {}
+            if verification.get("signature_status") in {"invalid", "nottrusted", "notsigned", "unsigned"}:
+                findings.append(Finding(
+                    "service_configuration_anomalies", SEVERITY_HIGH,
+                    f"Service '{service.get('service_name')}' loads an untrusted ServiceDll",
+                    "The service Parameters\\ServiceDll value resolves to a file whose signature is not trusted or is absent.",
+                    {"service_name": service.get("service_name"), "service_dll": service.get("service_dll"), "verification": verification},
+                ))
     return findings

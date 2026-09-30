@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { useLoad } from "../hooks";
+import { useInvestigationJob } from "../hooks/useInvestigationJob";
 import ScriptEditor from "../components/ScriptEditor";
 import { Loading, Notice, SevBadge } from "../components/ui";
 import { asArray, TEMPLATES, humanizeCollector, humanizeRule, lineFromError } from "../lib";
@@ -17,8 +18,10 @@ export default function WindowsTelemetry() {
   const catalog = useLoad((signal) => api.catalog(signal), []);
   const [selected, setSelected] = useState("");
   const [script, setScript] = useState(TEMPLATES["Windows telemetry hunt"]);
-  const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
+  const { start, job, error: jobError } = useInvestigationJob("windows-telemetry");
+  const running = Boolean(job && !["complete", "partial", "cancelled", "error"].includes(job.status));
+  useEffect(() => { if (job?.status === "complete" && job.investigation_id) { setSelected(String(job.investigation_id)); list.reload(); } }, [job?.status, job?.investigation_id]);
   const records = asArray(list.data);
   const chosen = records.find((r) => String(r.id) === selected);
   const report = chosen?.report_json;
@@ -27,13 +30,8 @@ export default function WindowsTelemetry() {
   const telemetryCollectors = ["windows_event_logs", "sysmon_events", "services"];
 
   async function run() {
-    setRunning(true); setError("");
-    try {
-      const r = await api.run(script);
-      setSelected(String(r.id));
-      await list.reload();
-    } catch (e) { setError(e.message); }
-    finally { setRunning(false); }
+    setError("");
+    try { await start(script); } catch (e) { setError(e.message); }
   }
 
   if (list.loading && !list.data) return <Loading />;
@@ -46,7 +44,8 @@ export default function WindowsTelemetry() {
         <button className="btn primary" disabled={running} onClick={run}>{running ? "Running hunt…" : "Run Windows telemetry hunt"}</button>
       </div>
       <Notice kind="info">This pack does not execute user-supplied PowerShell. Collection uses fixed, allowlisted read-only queries; analysis operates only on collected evidence.</Notice>
-      {error && <Notice>{error}</Notice>}
+      {(error || jobError) && <Notice>{error || jobError}</Notice>}
+      {job && !["complete", "error", "partial", "cancelled"].includes(job.status) && <div className="panel" style={{ marginBottom: 12 }}><div className="panel-b"><strong>Windows telemetry hunt is running on the server.</strong><div className="muted-copy">You can change tabs without cancelling it. Status: {job.status} · {job.progress ?? 0}%</div></div></div>}
       <div className="grid g3">
         <div className="panel kpi"><span>PowerShell indicators</span><b>{findings.filter((f) => f.rule_name.startsWith("powershell") || f.rule_name === "encoded_powershell").length}</b></div>
         <div className="panel kpi"><span>Service indicators</span><b>{findings.filter((f) => f.rule_name.includes("service")).length}</b></div>

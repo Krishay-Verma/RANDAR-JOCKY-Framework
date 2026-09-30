@@ -11,6 +11,7 @@ import hashlib
 import math
 import os
 import struct
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -296,7 +297,18 @@ def _parse_certificate(handle, file_size: int, directory) -> dict[str, Any]:
     certificate_count = 0
     if pkcs7 is not None:
         try:
-            certs = pkcs7.load_der_pkcs7_certificates(payload)
+            # Some Authenticode PKCS#7 blobs are BER-encoded or contain
+            # trailing certificate data. cryptography can recover these, but
+            # emits a UserWarning that otherwise pollutes the RANDAR operator
+            # console during normal PE triage. Keep the recovery behavior while
+            # treating the parser warning as non-fatal evidence noise.
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"PKCS#7 certificates could not be parsed as DER.*",
+                    category=UserWarning,
+                )
+                certs = pkcs7.load_der_pkcs7_certificates(payload)
             certificate_count = len(certs)
             if certs:
                 signer = certs[0].subject.rfc4514_string()

@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, saveBlob } from "../api/client";
 import { useLoad } from "../hooks";
 import EvidenceTable from "../components/EvidenceTable";
 import { EditCaseModal } from "./Investigations";
-import { Confirm, Loading, Notice, Pill, SevBadge } from "../components/ui";
+import { Confirm, Loading, Notice, Pill, SevBadge, ProgramFlags } from "../components/ui";
 import { asArray, humanizeCollector, humanizeRule, SEVERITIES, SEV_LABEL, fmtDuration, fmtTime } from "../lib";
 
 const NETWORK_HUNT_RULES = new Set([
@@ -30,8 +30,14 @@ const PE_RULES = new Set([
   "module_disk_mismatch", "suspicious_writable_module",
 ]);
 
-const PERSISTENCE_RULES = new Set(["unusual_scheduled_tasks", "suspicious_startup_items", "privileged_user_anomaly", "persistence_correlation", "suspicious_services", "writable_service_paths"]);
-const FINDING_FILTERS = ["all", "high", "review", "network", "injection", "persistence", "powershell"];
+const MEMORY_RULES = new Set([
+  "process_hollowing_indicators", "reflective_load_indicators", "thread_hijacking_indicators",
+  "injection_correlation", "in_memory_execution_indicators", "memory_forensics_correlation",
+]);
+const DRIVER_RULES = new Set(["byovd_driver_indicators", "driver_forensics_exposure"]);
+
+const PERSISTENCE_RULES = new Set(["unusual_scheduled_tasks", "suspicious_startup_items", "privileged_user_anomaly", "persistence_correlation", "persistence_cross_surface_correlation", "persistence_privilege_correlation", "suspicious_services", "writable_service_paths", "service_configuration_anomalies", "wmi_event_subscription", "ifeo_debugger", "winlogon_persistence", "appinit_dlls", "com_hijack", "bits_persistence", "all_users_startup", "browser_extensions", "office_addins", "lsa_auth_packages"]);
+const FINDING_FILTERS = ["all", "high", "review", "network", "injection", "memory", "driver", "persistence", "powershell"];
 
 function findingMatchesFilter(f, filter) {
   if (filter === "all") return true;
@@ -39,6 +45,8 @@ function findingMatchesFilter(f, filter) {
   if (filter === "review") return f.severity === "review_recommended";
   if (filter === "network") return NETWORK_HUNT_RULES.has(f.rule_name);
   if (filter === "injection") return INJECTION_RULES.has(f.rule_name) || PE_RULES.has(f.rule_name);
+  if (filter === "memory") return MEMORY_RULES.has(f.rule_name);
+  if (filter === "driver") return DRIVER_RULES.has(f.rule_name);
   if (filter === "persistence") return PERSISTENCE_RULES.has(f.rule_name);
   if (filter === "powershell") return WINDOWS_TELEMETRY_RULES.has(f.rule_name) && (f.rule_name.includes("powershell") || f.rule_name === "encoded_powershell");
   return false;
@@ -98,6 +106,38 @@ function peEvidence(report) {
   const collector = collectors.find((c) => c.target === "pe_metadata");
   const findings = asArray(report?.findings).filter((f) => PE_RULES.has(f.rule_name));
   return { collector, findings, files: collector?.data?.files || [] };
+}
+
+function memoryForensicsEvidence(report) {
+  const collectors = asArray(report?.collector_results);
+  const byTarget = (target) => collectors.find((c) => c.target === target);
+  return {
+    regions: byTarget("memory_regions"),
+    modules: byTarget("modules"),
+    threads: byTarget("threads"),
+    findings: asArray(report?.findings).filter((f) => MEMORY_RULES.has(f.rule_name)),
+  };
+}
+
+function driverForensicsEvidence(report) {
+  const collectors = asArray(report?.collector_results);
+  return {
+    drivers: collectors.find((c) => c.target === "driver_inventory"),
+    eventLogs: collectors.find((c) => c.target === "windows_event_logs"),
+    sysmon: collectors.find((c) => c.target === "sysmon_events"),
+    findings: asArray(report?.findings).filter((f) => DRIVER_RULES.has(f.rule_name)),
+  };
+}
+
+function persistenceForensicsEvidence(report) {
+  const collectors = asArray(report?.collector_results);
+  const byTarget = (target) => collectors.find((c) => c.target === target);
+  return {
+    startup: byTarget("startup_items"), tasks: byTarget("scheduled_tasks"), services: byTarget("services"),
+    users: byTarget("local_users"), sessions: byTarget("logged_in_users"), processes: byTarget("processes"),
+    events: byTarget("windows_event_logs"), sysmon: byTarget("sysmon_events"),
+    findings: asArray(report?.findings).filter((f) => PERSISTENCE_RULES.has(f.rule_name)),
+  };
 }
 
 function FindingRow({ f, onEvidence }) {
@@ -185,11 +225,15 @@ function InjectionFindingRow({ f, onEvidence }) {
 export default function InvestigationDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: rec, error, loading, reload } = useLoad((signal) => api.investigation(id, false, signal), [id]);
   const keys = useLoad((signal) => api.keyStatus(signal), []);
   const integrity = useLoad((signal) => api.integrity(id, signal), [id]);
   const audit = useLoad((signal) => api.audit(id, signal), [id]);
-  const [tab, setTab] = useState("findings");
+  const allowedTabs = new Set(["findings", "correlation", "network", "windows", "pe", "injection", "memory", "driver", "persistence", "evidence", "collectors", "meta", "integrity", "timeline", "audit"]);
+  const initialTab = allowedTabs.has(searchParams.get("tab")) ? searchParams.get("tab") : "findings";
+  const [tab, setTabState] = useState(initialTab);
+  const setTab = (next) => { setTabState(next); setSearchParams((prev) => { const p = new URLSearchParams(prev); if (next === "findings") p.delete("tab"); else p.set("tab", next); return p; }, { replace: true }); };
   const [sevFilter, setSevFilter] = useState("all");
   const [findingFilter, setFindingFilter] = useState("all");
   const [evTarget, setEvTarget] = useState(null);
@@ -222,6 +266,9 @@ export default function InvestigationDetail() {
   const windowsTelemetry = windowsTelemetryEvidence(report);
   const network = networkEvidence(report);
   const pe = peEvidence(report);
+  const memoryForensics = memoryForensicsEvidence(report);
+  const driverForensics = driverForensicsEvidence(report);
+  const persistenceForensics = persistenceForensicsEvidence(report);
   const visible = findings.filter((f) => (sevFilter === "all" || f.severity === sevFilter) && findingMatchesFilter(f, findingFilter));
   const collectors = asArray(report.collector_results);
   const activeTarget = evTarget || collectors.find((c) => c.status === "success")?.target;
@@ -231,8 +278,18 @@ export default function InvestigationDetail() {
   const categoryCounts = {
     all: findings.length, high: findings.filter((f) => f.severity === "high").length, review: findings.filter((f) => f.severity === "review_recommended").length,
     network: findings.filter((f) => findingMatchesFilter(f, "network")).length, injection: findings.filter((f) => findingMatchesFilter(f, "injection")).length,
+    memory: findings.filter((f) => findingMatchesFilter(f, "memory")).length, driver: findings.filter((f) => findingMatchesFilter(f, "driver")).length,
     persistence: findings.filter((f) => findingMatchesFilter(f, "persistence")).length, powershell: findings.filter((f) => findingMatchesFilter(f, "powershell")).length,
   };
+  const softwareRows = [];
+  for (const [target, key] of [["processes", "processes"], ["modules", "modules"], ["driver_inventory", "drivers"]]) {
+    const data = collectors.find((c) => c.target === target)?.data || {};
+    for (const item of asArray(data[key])) {
+      if (asArray(item.program_flags).length || item.kernel_component_observed) softwareRows.push({ ...item, _target: target });
+    }
+  }
+  const softwareByProduct = {};
+  for (const row of softwareRows) for (const flag of asArray(row.program_flags)) softwareByProduct[flag.key] = (softwareByProduct[flag.key] || 0) + 1;
   const drawerCollector = drawerRef?.collector ? collectors.find((c) => c.target === drawerRef.collector) : null;
 
   async function download(kind) {
@@ -253,10 +310,14 @@ export default function InvestigationDetail() {
 
   const tabs = [
     ["findings", `Findings (${findings.length})`],
+    ["correlation", `Cross-Surface Correlation (${findings.length})`],
     ["network", `Network Forensics${network.collector ? ` (${networkHuntFindings.length})` : " · not collected"}`],
     ["windows", `Windows Telemetry${windowsTelemetry.eventLogs || windowsTelemetry.sysmon || windowsTelemetry.services ? ` (${windowsTelemetry.findings.length})` : " · not collected"}`],
     ["pe", `PE / Module${pe.collector ? ` (${pe.findings.length})` : " · not collected"}`],
     ["injection", `DLL / injection (${injection.findings.length})`],
+    ["memory", `Memory Forensics${memoryForensics.regions ? ` (${memoryForensics.findings.length})` : " · not collected"}`],
+    ["driver", `Driver Forensics${driverForensics.drivers ? ` (${driverForensics.findings.length})` : " · not collected"}`],
+    ["persistence", `Persistence & Privilege${persistenceForensics.startup || persistenceForensics.tasks || persistenceForensics.services ? ` (${persistenceForensics.findings.length})` : " · not collected"}`],
     ["evidence", "Evidence"],
     ["collectors", `Collectors (${collectors.length})`],
     ["meta", "Case details"],
@@ -299,6 +360,18 @@ export default function InvestigationDetail() {
         </div><div className="panel-b v19-resource-strip"><span>Execution: <b>{report.execution_status || "complete"}</b></span><span>Elapsed: <b>{report.elapsed_ms || 0} ms</b></span><span>Records: <b>{report.resource_usage?.records_collected ?? 0}</b></span><span>Evidence: <b>{report.resource_usage?.evidence_bytes ?? 0} bytes</b></span><span>Timeouts: <b>{report.resource_usage?.timed_out_collectors ?? 0}</b></span><span>Truncated: <b>{report.resource_usage?.truncated_collectors ?? 0}</b></span></div></div>
       </div>
 
+      <div className="panel">
+        <div className="panel-h"><div><h3>Collection coverage</h3><div className="panel-subtitle">Elevation state and per-collector confidence are explicit so a partial scan is not mistaken for a complete one.</div></div><span className="badge">{report.elevation?.is_admin === true ? "admin" : report.elevation?.is_admin === false ? "standard user" : "unknown"}</span></div>
+        <div className="panel-b"><div className="grid g3"><div className="kpi"><span>Elevation</span><b>{report.elevation?.is_elevated === true ? "elevated" : report.elevation?.is_elevated === false ? "not elevated" : "unknown"}</b></div><div className="kpi"><span>Unavailable collectors</span><b>{asArray(report.coverage?.unavailable).length}</b></div><div className="kpi"><span>Degraded collectors</span><b>{asArray(report.coverage?.degraded).length}</b></div></div><div className="tbl-wrap" style={{ marginTop: 10 }}><table className="t"><thead><tr><th>Collector</th><th>Status</th><th>Confidence</th><th>Records</th><th>Detail</th></tr></thead><tbody>{asArray(report.coverage?.collectors).map((c, i) => <tr key={`${c.collector}-${i}`}><td className="mono">{c.collector}</td><td>{c.status}</td><td><Pill value={c.confidence} label={c.confidence} /></td><td className="num">{c.record_count ?? 0}</td><td>{c.error || (c.truncated ? "Bounded/truncated evidence" : "")}</td></tr>)}</tbody></table></div></div>
+      </div>
+
+      {softwareRows.length > 0 && <div className="panel software-context-panel">
+        <div className="panel-h"><div><h3>Software context</h3><div className="panel-subtitle">Known security, anti-cheat and common system software classified from collected process/module/driver metadata. Flags are contextual, not threat verdicts.</div></div><span className="badge">{Object.keys(softwareByProduct).length} product classes</span></div>
+        <div className="panel-b"><div className="row" style={{ flexWrap: "wrap", marginBottom: 10 }}>{Object.entries(softwareByProduct).map(([key, count]) => <span className="program-flag" key={key}>{key.replaceAll("_", " ")} · {count}</span>)}</div>
+          <div className="tbl-wrap"><table className="t"><thead><tr><th>Object</th><th>Source</th><th>Program flags</th><th>Kernel evidence</th></tr></thead><tbody>{softwareRows.slice(0, 100).map((row, i) => <tr key={`${row._target}-${row.pid || row.service_name || row.module_name}-${i}`}><td><b>{row.name || row.service_name || row.module_name || "unknown"}</b><div className="finding-code mono">{row.exe_path || row.image_path || row.module_path || "path unavailable"}</div></td><td>{row._target}</td><td><ProgramFlags flags={row.program_flags} kernelObserved={Boolean(row.kernel_component_observed)} compact /></td><td>{row.kernel_component_observed ? <span className="program-flag flag-kernel">Observed</span> : <span className="muted-copy">No matching driver evidence</span>}</td></tr>)}</tbody></table></div>
+        </div>
+      </div>}
+
       <div className="panel injection-banner injection-summary">
         <div className="panel-b">
           <div>
@@ -326,6 +399,15 @@ export default function InvestigationDetail() {
             <span>{SEV_LABEL[k]}</span><b>{counts[k] || 0}</b>
           </div>
         ))}
+      </div>
+
+      <div className="specialized-tabs" aria-label="Specialized forensic workspaces">
+        <div className="specialized-tabs-label">Forensic workspaces</div>
+        <div className="specialized-tabs-actions">
+          <button className={`forensic-jump ${tab === "memory" ? "on" : ""}`} onClick={() => setTab("memory")} aria-pressed={tab === "memory"}>Memory Forensics <span>{memoryForensics.findings.length}</span></button>
+          <button className={`forensic-jump ${tab === "driver" ? "on" : ""}`} onClick={() => setTab("driver")} aria-pressed={tab === "driver"}>Driver Forensics <span>{driverForensics.findings.length}</span></button>
+          <button className={`forensic-jump ${tab === "persistence" ? "on" : ""}`} onClick={() => setTab("persistence")} aria-pressed={tab === "persistence"}>Persistence &amp; Privilege <span>{persistenceForensics.findings.length}</span></button>
+        </div>
       </div>
 
       <div className="tabs detail-tabs" role="tablist" aria-label="Investigation sections">
@@ -444,6 +526,68 @@ export default function InvestigationDetail() {
         </div>
       )}
 
+      {tab === "memory" && (
+        <div className="forensics-workspace">
+          <div className="grid g4 case-severity-grid">
+            <div className="panel kpi"><span>Memory regions</span><b>{memoryForensics.regions?.data?.count ?? memoryForensics.regions?.data?.regions?.length ?? 0}</b></div>
+            <div className="panel kpi"><span>Modules</span><b>{memoryForensics.modules?.data?.count ?? memoryForensics.modules?.data?.modules?.length ?? 0}</b></div>
+            <div className="panel kpi"><span>Threads</span><b>{memoryForensics.threads?.data?.count ?? memoryForensics.threads?.data?.threads?.length ?? 0}</b></div>
+            <div className={`panel kpi ${memoryForensics.findings.length ? "warn" : ""}`}><span>Memory indicators</span><b>{memoryForensics.findings.length}</b></div>
+          </div>
+          <div className="panel">
+            <div className="panel-h"><div><h3>Memory forensics coverage</h3><div className="panel-subtitle">Read-only virtual-memory, module and thread metadata correlated within this investigation.</div></div><span className="badge">{memoryForensics.regions ? "collected" : "not collected"}</span></div>
+            <div className="panel-b"><div className="forensics-status-grid">
+              {[['Virtual memory regions', memoryForensics.regions], ['Loaded modules', memoryForensics.modules], ['Process threads', memoryForensics.threads]].map(([label, c]) => <div className="telemetry-status" key={label}><b>{label}</b><span className={`badge ${c?.status === "success" ? "st-success" : "st-error"}`}>{c?.status || "not collected"}</span><small>{c?.data?.error || `${c?.data?.count ?? 0} records`}</small></div>)}
+            </div></div>
+          </div>
+          <div className="panel">
+            <div className="panel-h"><div><h3>Memory forensics findings</h3><div className="panel-subtitle">Correlations are investigation leads, not proof of process injection or malicious execution.</div></div><span className="badge">{memoryForensics.findings.length} indicators</span></div>
+            {memoryForensics.findings.length ? <div className="tbl-wrap"><table className="t"><thead><tr><th>Severity</th><th>Finding</th><th>Observation</th><th>Next check</th></tr></thead><tbody>{memoryForensics.findings.map((f, i) => <tr key={`${f.rule_name}-${i}`}><td><SevBadge sev={f.severity} /></td><td><div className="finding-name">{humanizeRule(f.rule_name)}</div><div className="finding-code mono">{f.rule_name}</div></td><td><b>{f.summary}</b><div className="finding-reason">{f.reason}</div></td><td>{f.next_check || "Review supporting memory and thread evidence."}</td></tr>)}</tbody></table></div> : <div className="empty"><h3>No memory-forensics indicators</h3><div>The configured memory rules ran without producing a matching observation, or the required memory collectors were not collected.</div></div>}
+          </div>
+        </div>
+      )}
+
+      {tab === "driver" && (
+        <div className="forensics-workspace">
+          <div className="grid g4 case-severity-grid">
+            <div className="panel kpi"><span>Driver records</span><b>{driverForensics.drivers?.data?.count ?? driverForensics.drivers?.data?.drivers?.length ?? 0}</b></div>
+            <div className="panel kpi"><span>Loaded drivers</span><b>{asArray(driverForensics.drivers?.data?.drivers).filter((d) => d.loaded).length}</b></div>
+            <div className="panel kpi"><span>Driver indicators</span><b>{driverForensics.findings.length}</b></div>
+            <div className="panel kpi"><span>Telemetry</span><b>{[driverForensics.eventLogs, driverForensics.sysmon].filter((c) => c?.status === "success").length}/2</b></div>
+          </div>
+          <div className="panel">
+            <div className="panel-h"><div><h3>Driver inventory</h3><div className="panel-subtitle">Read-only registered/loaded driver metadata and vulnerability provenance.</div></div><span className="badge">{driverForensics.drivers ? "collected" : "not collected"}</span></div>
+            {driverForensics.drivers?.data?.drivers?.length ? <div className="tbl-wrap"><table className="t"><thead><tr><th>Service</th><th>Driver</th><th>State</th><th>Signature</th><th>SHA-256</th><th>Vulnerability</th></tr></thead><tbody>{driverForensics.drivers.data.drivers.map((d, i) => <tr key={`${d.service_name || d.name || "driver"}-${i}`}><td><div className="finding-name">{d.service_name || "-"}</div><div className="finding-code mono">{d.image_path || "path unavailable"}</div></td><td>{d.display_name || d.name || "-"}</td><td>{d.loaded ? "loaded" : "registered"}</td><td>{d.signature_status || "unknown"}</td><td className="mono">{d.sha256 || "-"}</td><td>{d.known_vulnerable ? <span className="badge sev-high">Matched</span> : "-"}</td></tr>)}</tbody></table></div> : <div className="empty"><h3>No driver inventory</h3><div>{driverForensics.drivers ? "The collector returned no driver records." : "This investigation did not collect driver inventory."}</div></div>}
+          </div>
+          <div className="panel">
+            <div className="panel-h"><div><h3>Driver / kernel findings</h3><div className="panel-subtitle">Vulnerability matches are based on configured catalog evidence; absence of a match does not prove a driver is safe.</div></div><span className="badge">{driverForensics.findings.length} indicators</span></div>
+            {driverForensics.findings.length ? <div className="tbl-wrap"><table className="t"><thead><tr><th>Severity</th><th>Finding</th><th>Observation</th><th>Next check</th></tr></thead><tbody>{driverForensics.findings.map((f, i) => <tr key={`${f.rule_name}-${i}`}><td><SevBadge sev={f.severity} /></td><td><div className="finding-name">{humanizeRule(f.rule_name)}</div><div className="finding-code mono">{f.rule_name}</div></td><td><b>{f.summary}</b><div className="finding-reason">{f.reason}</div></td><td>{f.next_check || "Review driver path, signature and catalog provenance."}</td></tr>)}</tbody></table></div> : <div className="empty"><h3>No driver-forensics indicators</h3><div>The configured driver rules did not produce a matching observation in this investigation.</div></div>}
+          </div>
+        </div>
+      )}
+
+      {tab === "correlation" && (
+        <div className="correlation-workspace">
+          <div className="grid g4 case-severity-grid">
+            <div className="panel kpi"><span>Total findings</span><b>{findings.length}</b></div>
+            <div className="panel kpi"><span>Evidence surfaces</span><b>{new Set(findings.flatMap((f) => asArray(f.evidence_refs).map((r) => r.collector).filter(Boolean))).size}</b></div>
+            <div className="panel kpi"><span>High / critical</span><b>{findings.filter((f) => f.severity === "high" || f.severity === "critical").length}</b></div>
+            <div className="panel kpi"><span>Review indicators</span><b>{findings.filter((f) => f.severity === "review_recommended").length}</b></div>
+          </div>
+          <div className="panel">
+            <div className="panel-h"><div><h3>Cross-surface correlation</h3><div className="panel-subtitle">A read-only case view that groups findings by the evidence collectors supporting them. It does not infer causality or assign a malware verdict.</div></div><span className="badge">{findings.length} findings</span></div>
+            {findings.length ? (
+              <div className="tbl-wrap"><table className="t"><thead><tr><th>Severity</th><th>Finding</th><th>Evidence surfaces</th><th>Next check</th></tr></thead><tbody>
+                {findings.map((f, i) => {
+                  const surfaces = [...new Set(asArray(f.evidence_refs).map((r) => r.collector).filter(Boolean))];
+                  return <tr key={`corr-${f.rule_name}-${i}`}><td><SevBadge sev={f.severity} /></td><td><div className="finding-name">{humanizeRule(f.rule_name)}</div><div className="finding-code mono">{f.rule_name}</div><div className="finding-reason">{f.summary}</div></td><td>{surfaces.length ? <div className="correlation-tags">{surfaces.map((x) => <span key={x}>{humanizeCollector(x)}</span>)}</div> : <span className="muted-copy">Finding has no collector references.</span>}</td><td>{f.next_check || "Review the supporting evidence and validate the observation."}</td></tr>;
+                })}
+              </tbody></table></div>
+            ) : <div className="empty"><h3>No findings to correlate</h3><div>Run the investigation with the relevant collectors and analysis rules enabled.</div></div>}
+          </div>
+        </div>
+      )}
+
       {tab === "network" && (
         <div className="network-workspace">
           <div className="grid g4 case-severity-grid">
@@ -494,6 +638,23 @@ export default function InvestigationDetail() {
           <div className="grid g2">
             <div className="panel"><div className="panel-h"><div><h3>Protocols</h3><div className="panel-subtitle">Normalized protocol distribution.</div></div></div><table className="t"><thead><tr><th>Protocol</th><th>Count</th></tr></thead><tbody>{Object.entries(network.stats.protocol_counts || {}).map(([p, n]) => <tr key={p}><td className="mono">{p}</td><td>{n}</td></tr>)}</tbody></table></div>
             <div className="panel"><div className="panel-h"><div><h3>Connection evidence</h3><div className="panel-subtitle">Source, destination, ports and DNS metadata.</div></div></div><EvidenceTable data={network.data} investigationId={id} collectorTarget="network_artifacts" /></div>
+          </div>
+        </div>
+      )}
+
+      {tab === "persistence" && (
+        <div className="forensics-workspace">
+          <div className="panel"><div className="panel-h"><div><h3>Persistence &amp; privilege evidence</h3><div className="panel-subtitle">Read-only evidence already collected by this investigation.</div></div><span className="badge">{persistenceForensics.findings.length} indicators</span></div>
+            <div className="grid g4 persistence-metrics">
+              {[["Startup items", persistenceForensics.startup?.data?.count], ["Scheduled tasks", persistenceForensics.tasks?.data?.count], ["Services", persistenceForensics.services?.data?.count], ["Local users", persistenceForensics.users?.data?.count], ["Sessions", persistenceForensics.sessions?.data?.count], ["Processes", persistenceForensics.processes?.data?.count], ["Privilege events", (persistenceForensics.events?.data?.events || []).filter((e) => e.event_type === "privilege").length], ["Service changes", (persistenceForensics.events?.data?.events || []).filter((e) => e.event_type === "service_change").length]].map(([label,value]) => <div className="panel kpi" key={label}><span>{label}</span><b>{value ?? 0}</b></div>)}
+            </div>
+          </div>
+          <div className="panel"><div className="panel-h"><div><h3>Persistence findings</h3><div className="panel-subtitle">Cross-surface and privilege context is treated as an investigation lead, not proof of abuse.</div></div></div>
+            {persistenceForensics.findings.length ? <div className="tbl-wrap"><table className="t"><thead><tr><th>Severity</th><th>Rule</th><th>Observation</th><th>Next check</th></tr></thead><tbody>{persistenceForensics.findings.map((f,i)=><tr key={`${f.rule_name}-${i}`}><td><SevBadge sev={f.severity}/></td><td><div className="finding-name">{humanizeRule(f.rule_name)}</div><div className="finding-code mono">{f.rule_name}</div></td><td><b>{f.summary}</b><div className="finding-reason">{f.reason}</div></td><td>{f.next_check || "Review supporting persistence evidence."}</td></tr>)}</tbody></table></div> : <div className="empty"><h3>No persistence indicators</h3><div>The configured persistence and privilege rules did not produce a matching observation.</div></div>}
+          </div>
+          <div className="grid g2">
+            <div className="panel"><div className="panel-h"><div><h3>Startup and scheduled-task evidence</h3></div></div><EvidenceTable data={persistenceForensics.startup?.data || persistenceForensics.tasks?.data || {}} investigationId={id} collectorTarget={persistenceForensics.startup ? "startup_items" : "scheduled_tasks"} /></div>
+            <div className="panel"><div className="panel-h"><div><h3>Service evidence</h3></div></div><EvidenceTable data={persistenceForensics.services?.data || {}} investigationId={id} collectorTarget="services" /></div>
           </div>
         </div>
       )}

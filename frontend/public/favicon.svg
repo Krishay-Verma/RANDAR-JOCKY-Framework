@@ -1,13 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="title desc">
-  <title id="title">RANDAR forensic triage mark</title>
-  <desc id="desc">Green shield containing a dark letter J.</desc>
+  <title id="title">RANDAR forensic radar compass</title>
+  <desc id="desc">A green shield containing a radar and compass mark.</desc>
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#25b77b"/>
-      <stop offset="1" stop-color="#118a58"/>
+    <linearGradient id="shield" x1="18" y1="10" x2="78" y2="86" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#27b77c"/>
+      <stop offset="1" stop-color="#0d8152"/>
+    </linearGradient>
+    <linearGradient id="sweep" x1="48" y1="48" x2="80" y2="23" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#dffff0" stop-opacity=".65"/>
+      <stop offset="1" stop-color="#dffff0" stop-opacity="0"/>
     </linearGradient>
   </defs>
-  <path d="M48 4 82 16v27c0 23-13 39-34 49C27 82 14 66 14 43V16L48 4Z" fill="url(#g)" stroke="#0c5e3e" stroke-width="3"/>
-  <path d="M35 28h27v9H45v20c0 8-4 12-12 12h-4v-9h3c2 0 3-1 3-4V28Z" fill="#071712"/>
-  <circle cx="69" cy="27" r="5" fill="#e8fff4" opacity=".9"/>
+  <path d="M48 4 82 16v27c0 23-13 39-34 49C27 82 14 66 14 43V16L48 4Z" fill="url(#shield)" stroke="#075d3d" stroke-width="3"/>
+  <circle cx="48" cy="45" r="25" fill="#0a2319" stroke="#c9f5df" stroke-width="2" opacity=".98"/>
+  <circle cx="48" cy="45" r="17" fill="none" stroke="#42b982" stroke-width="1.5" opacity=".75"/>
+  <circle cx="48" cy="45" r="9" fill="none" stroke="#42b982" stroke-width="1.5" opacity=".7"/>
+  <path d="M48 20v50M23 45h50" stroke="#8adbb7" stroke-width="1" opacity=".45"/>
+  <path d="M48 45 68 27A25 25 0 0 1 48 45Z" fill="url(#sweep)"/>
+  <path d="m48 29 5 16-5 16-5-16 5-16Z" fill="#effff7"/>
+  <circle cx="48" cy="45" r="4.2" fill="#18a86b" stroke="#071711" stroke-width="2"/>
+  <path d="M48 15v6M48 69v6M18 45h6M72 45h6" stroke="#e8fff4" stroke-width="2" stroke-linecap="round" opacity=".9"/>
 </svg>

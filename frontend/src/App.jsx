@@ -6,6 +6,10 @@ import NewInvestigation from "./pages/NewInvestigation";
 import InvestigationDetail from "./pages/InvestigationDetail";
 import Agents from "./pages/Agents";
 import Bytecode from "./pages/Bytecode";
+import Runtime from "./pages/Runtime";
+import MemoryForensics from "./pages/MemoryForensics";
+import DriverForensics from "./pages/DriverForensics";
+import PersistenceForensics from "./pages/PersistenceForensics";
 import Keys from "./pages/Keys";
 import InjectionAnalysis from "./pages/InjectionAnalysis";
 import NetworkEvidence from "./pages/NetworkEvidence";
@@ -92,13 +96,13 @@ class RouteErrorBoundary extends React.Component {
 
 const TITLES = [
   ["/investigations/new", "New investigation"], ["/investigations", "Investigations"],
-  ["/search", "Evidence search"], ["/agents", "Endpoint agents"], ["/bytecode", "Bytecode"], ["/keys", "Report encryption"],
+  ["/search", "Evidence search"], ["/agents", "Endpoint agents"], ["/runtime", "Runtime"], ["/memory-forensics", "Memory Forensics"], ["/driver-forensics", "Driver Forensics"], ["/persistence-forensics", "Persistence & Privilege Forensics"], ["/bytecode", "Bytecode"], ["/keys", "Report encryption"],
   ["/injection", "DLL / injection analysis"], ["/network", "Network Forensics"], ["/windows", "Windows Telemetry"], ["/", "Dashboard"],
 ];
 
 const NAV = [
   ["/", "⌂", "Dashboard", true], ["/investigations", "▤", "Investigations", true],
-  ["/investigations/new", "+", "New investigation"], ["/agents", "◎", "Endpoint agents"],
+  ["/investigations/new", "+", "New investigation"], ["/agents", "◎", "Endpoint agents"], ["/runtime", "▶", "Runtime"], ["/memory-forensics", "◉", "Memory Forensics"], ["/driver-forensics", "◈", "Driver Forensics"], ["/persistence-forensics", "⌁", "Persistence & Privilege"],
   ["/network", "◌", "Network Forensics"], ["/windows", "▦", "Windows Telemetry"],
   ["/bytecode", "⌘", "Bytecode"], ["/injection", "⚠", "DLL / injection", false, true],
   ["/keys", "▣", "Report encryption"],
@@ -135,8 +139,8 @@ function Shell() {
         <div className="brand"><div className="brand-mark"><img src="/randar-icon.svg" alt="RANDAR" /></div><div><b>RANDAR</b><small>Forensic triage</small></div></div>
         <nav className="nav" aria-label="Primary">
           <div className="nav-sec">Monitor</div>{NAV.slice(0, 2).map(link)}
-          <div className="nav-sec">Operate</div>{NAV.slice(2, 6).map(link)}
-          <div className="nav-sec">Administration</div>{NAV.slice(6).map(link)}
+          <div className="nav-sec">Operate</div>{NAV.slice(2, 9).map(link)}
+          <div className="nav-sec">Administration</div>{NAV.slice(9).map(link)}
         </nav>
         <div className="side-foot">RANDAR forensic console<br /><span>Local operator session</span></div>
       </aside>
@@ -168,7 +172,7 @@ export default function App() {
     <Route element={<Shell />}>
       <Route index element={<Dashboard />} /><Route path="investigations" element={<Investigations />} />
       <Route path="investigations/new" element={<NewInvestigation />} /><Route path="investigations/:id" element={<InvestigationDetail />} />
-      <Route path="search" element={<Search />} /><Route path="agents" element={<Agents />} /><Route path="network" element={<NetworkEvidence />} /><Route path="injection" element={<InjectionAnalysis />} /><Route path="windows" element={<WindowsTelemetry />} /><Route path="bytecode" element={<Bytecode />} />
+      <Route path="search" element={<Search />} /><Route path="agents" element={<Agents />} /><Route path="runtime" element={<Runtime />} /><Route path="memory-forensics" element={<MemoryForensics />} /><Route path="driver-forensics" element={<DriverForensics />} /><Route path="persistence-forensics" element={<PersistenceForensics />} /><Route path="network" element={<NetworkEvidence />} /><Route path="injection" element={<InjectionAnalysis />} /><Route path="windows" element={<WindowsTelemetry />} /><Route path="bytecode" element={<Bytecode />} />
       <Route path="keys" element={<Keys />} /><Route path="*" element={<Navigate to="/" replace />} />
     </Route>
   </Routes></BrowserRouter></AppErrorBoundary>;

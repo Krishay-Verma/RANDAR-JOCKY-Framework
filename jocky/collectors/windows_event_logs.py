@@ -36,6 +36,9 @@ _EVENT_TYPES = {
     4647: "logon",
     4672: "privilege",
     7045: "service_change",
+    4698: "scheduled_task_created",
+    106: "scheduled_task_created",
+    4699: "scheduled_task_deleted",
     4103: "powershell",
     4104: "powershell",
 }
@@ -76,9 +79,12 @@ def collect_windows_event_logs() -> dict[str, Any]:
         try:
             output = _query_log(log_name, min(_MAX_EVENTS_PER_LOG, _MAX_TOTAL_EVENTS - len(events)))
             parsed = _parse_events(output, source=log_name)
-            events.extend(e for e in parsed if e["event_type"] in set(_EVENT_TYPES.values()))
+            matched = [e for e in parsed if e["event_type"] in set(_EVENT_TYPES.values())]
+            events.extend(matched)
             sources.append(log_name)
-            if len(parsed) >= _MAX_EVENTS_PER_LOG:
+            # `truncated` means the matching event set hit the collection cap,
+            # not merely that the raw channel returned the query count.
+            if len(events) >= _MAX_TOTAL_EVENTS or len(matched) >= _MAX_EVENTS_PER_LOG:
                 truncated = True
         except Exception as exc:
             errors.append(f"{log_name}: {exc}")
@@ -183,7 +189,9 @@ def _result(events: list[dict[str, Any]], sources: list[str], truncated: bool) -
         "count": len(events),
         "event_type_counts": counts,
         "sources": sources,
-        "truncated": truncated,
+        "truncated": bool(truncated and events),
+        "status": "success" if events or sources else "no_matching_events",
+        "collection_note": "No matching events were returned; this is distinct from access failure or truncation.",
     }
 
 
@@ -220,5 +228,10 @@ def collect_log_metadata(log_name: str, event_ids: set[int], fixture_env: str) -
             "truncated": len(parsed) >= _MAX_TOTAL_EVENTS,
         }
     except Exception as exc:
+        detail = str(exc)
+        lower = detail.casefold()
+        if "not found" in lower or "cannot find" in lower or "could not be opened" in lower or "channel name" in lower:
+            return {"supported": True, "platform": "Windows", "events": [], "count": 0,
+                    "source": "fixture" if fixture else log_name, "status": "not_installed", "error": None, "message": "Channel is not installed or is unavailable on this host."}
         return {"supported": True, "platform": "Windows", "events": [], "count": 0,
-                "source": "fixture" if fixture else log_name, "error": str(exc)}
+                "source": "fixture" if fixture else log_name, "status": "error", "error": detail[:500]}

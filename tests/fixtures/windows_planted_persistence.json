@@ -1,0 +1,22 @@
+{
+  "system_info": {"hostname":"LAB-PERSISTENCE","is_admin":false,"is_elevated":false,"integrity_level":"medium"},
+  "services": {"services":[
+    {"service_name":"PlantedSvc","executable":"C:\\Users\\User\\AppData\\Local\\Temp\\planted.exe","command_line":"C:\\Users\\User\\AppData\\Local\\Temp\\planted.exe","writable_path":true,"start_mode":"auto","verification":{"exists":true,"signature_status":"notsigned","publisher":null,"trusted_publisher":false}}
+  ],"count":1},
+  "startup_items": {"items":[
+    {"name":"PlantedRun","command":"C:\\Users\\User\\AppData\\Local\\Temp\\run.exe","type":"registry_run_key","path_risk_score":2,"verification":{"exists":true,"signature_status":"notsigned","trusted_publisher":false}}
+  ],"count":1},
+  "scheduled_tasks": {"tasks":[
+    {"name":"\\SystemOptimizerTemp","task_to_run":"C:\\Users\\User\\AppData\\Local\\Temp\\HP\\SystemOptimizerTemp\\SystemOptimizer.exe -update","run_as":"SYSTEM","recent_creation":true,"path_risk_score":2,"verification":{"exists":true,"signature_status":"notsigned","trusted_publisher":false}}
+  ],"count":1},
+  "wmi_event_subscriptions": {"records":[{"Name":"PlantedConsumer","ExecutablePath":"C:\\Users\\User\\AppData\\Local\\Temp\\wmi.exe","verification":{"exists":true,"signature_status":"notsigned","trusted_publisher":false}}],"count":1},
+  "ifeo_persistence": {"records":[],"count":0},
+  "winlogon_persistence": {"records":[],"count":0},
+  "appinit_persistence": {"records":[],"count":0},
+  "com_hijack_persistence": {"records":[],"count":0},
+  "bits_persistence": {"records":[],"count":0},
+  "all_users_startup": {"records":[],"count":0},
+  "browser_extensions": {"records":[],"count":0},
+  "office_addins": {"records":[],"count":0},
+  "lsa_auth_packages": {"records":[],"count":0}
+}

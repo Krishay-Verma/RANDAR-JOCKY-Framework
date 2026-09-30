@@ -8,8 +8,11 @@ SYSMON_EVENT_IDS = {1, 3, 7, 8, 10, 11, 12, 13, 14, 22}
 
 
 def collect_sysmon_events() -> dict[str, Any]:
-    return collect_log_metadata(
+    result = collect_log_metadata(
         "Microsoft-Windows-Sysmon/Operational",
         SYSMON_EVENT_IDS,
         "JOCKY_SYSMON_EVENT_LOG_FIXTURE",
     )
+    if result.get("status") == "not_installed":
+        result["error"] = None
+    return result

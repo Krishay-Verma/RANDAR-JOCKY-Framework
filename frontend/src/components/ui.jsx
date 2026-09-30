@@ -75,3 +75,14 @@ export function SevChips({ counts = {} }) {
 
 
 
+
+export function ProgramFlags({ flags = [], kernelObserved = false, compact = false, kernelLabel = "KERNEL COMPONENT" }) {
+  const items = Array.isArray(flags) ? flags : [];
+  if (!items.length && !kernelObserved) return <span className="muted-copy">—</span>;
+  return <div className={`program-flags${compact ? " compact" : ""}`}>
+    {items.map((f) => <span key={f.key} className={`program-flag flag-${f.category || "software"}`} title={`${f.label} · ${f.match_basis || "classified from endpoint metadata"}`}>
+      {f.label}
+    </span>)}
+    {kernelObserved && <span className="program-flag flag-kernel" title="A matching kernel/driver component was observed in collected endpoint evidence.">{kernelLabel}</span>}
+  </div>;
+}

@@ -20,6 +20,8 @@ import subprocess
 import sys
 from typing import Any
 
+from jocky.analysis.persistence_enrichment import enrich_record, expand_windows_vars, parent_folder_context
+
 _MAX_TASKS = 500
 _WIN_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
@@ -54,20 +56,52 @@ def _windows_tasks() -> dict[str, Any]:
             name = row.get("TaskName", "").strip()
             if not name or name == "TaskName":
                 continue
-            tasks.append({
+            task = {
                 "name": name,
                 "status": row.get("Status", "").strip(),
                 "run_as": row.get("Run As User", "").strip(),
-                "task_to_run": row.get("Task To Run", "").strip(),
+                "task_to_run": expand_windows_vars(row.get("Task To Run", "").strip()),
                 "next_run": row.get("Next Run Time", "").strip(),
                 "last_run": row.get("Last Run Time", "").strip(),
-            })
+                "schedule_type": row.get("Schedule Type", "").strip(),
+                "author": row.get("Author", "").strip(),
+            }
+            enriched = enrich_record(task, task.get("task_to_run"))
+            # Expensive context is only gathered for paths that have an
+            # explicit risk signal; the normal clean-task path stays cheap.
+            if int(enriched.get("path_risk_score") or 0) > 0:
+                enriched["parent_folder_context"] = parent_folder_context(enriched.get("path_normalized") or enriched.get("task_to_run"))
+                enriched["registry_task_cache"] = _task_registry_context(name)
+            tasks.append(enriched)
             if len(tasks) >= _MAX_TASKS:
                 break
     except Exception as exc:
         return {"tasks": [], "count": 0, "platform": "Windows", "error": str(exc)}
 
     return {"tasks": tasks, "count": len(tasks), "platform": "Windows"}
+
+
+def _task_registry_context(task_name: str) -> dict[str, Any]:
+    if os.name != "nt" or not task_name:
+        return {"status": "not_available"}
+    try:
+        import winreg
+        base = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Schedule\\TaskCache\\Tree\\"
+        parts = [p for p in str(task_name).strip("\\").split("\\") if p]
+        key_path = base + "\\".join(parts)
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_READ)
+        values = {}
+        try:
+            idx = 0
+            while True:
+                try:
+                    n, v, _ = winreg.EnumValue(key, idx); values[n] = v; idx += 1
+                except OSError: break
+        finally:
+            winreg.CloseKey(key)
+        return {"status": "success", "registry_path": key_path, "values": values}
+    except Exception as exc:
+        return {"status": "unavailable", "error": str(exc)[:300]}
 
 
 # ── Linux ──────────────────────────────────────────────────────────────────────

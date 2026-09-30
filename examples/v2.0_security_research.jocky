@@ -1,0 +1,13 @@
+investigation "v2.0 controlled security research" {
+  collect processes;
+  collect modules;
+  collect threads;
+  collect memory_regions;
+  collect driver_inventory;
+
+  analyze in_memory_execution_indicators;
+  analyze byovd_driver_indicators;
+  analyze injection_correlation;
+
+  report "v2.0 research observations";
+}

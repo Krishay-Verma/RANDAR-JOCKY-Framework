@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { useLoad } from "../hooks";
+import { useInvestigationJob } from "../hooks/useInvestigationJob";
 import { Loading, Notice, SevBadge } from "../components/ui";
 import { humanizeRule } from "../lib";
 
@@ -44,8 +45,10 @@ function findingsFor(report) { return (report?.findings || []).filter((f) => RUL
 export default function InjectionAnalysis() {
   const list = useLoad((signal) => api.investigations(signal), []);
   const [selected, setSelected] = useState("");
-  const [running, setRunning] = useState(false);
   const [message, setMessage] = useState("");
+  const { start, job, error: jobError } = useInvestigationJob("injection-pe");
+  const running = Boolean(job && !["complete", "partial", "cancelled", "error"].includes(job.status));
+  useEffect(() => { if (job?.status === "complete" && job.investigation_id) { setSelected(String(job.investigation_id)); list.reload(); setMessage(`Windows injection hunt #${job.investigation_id} completed.`); } }, [job?.status, job?.investigation_id]);
 
   const records = Array.isArray(list.data) ? list.data : [];
   const chosen = records.find((r) => String(r.id) === selected);
@@ -58,14 +61,8 @@ export default function InjectionAnalysis() {
   const telemetryAvailable = Boolean(collector(report, "modules") || collector(report, "threads") || collector(report, "memory_regions") || collector(report, "pe_metadata"));
 
   async function run() {
-    setRunning(true); setMessage("");
-    try {
-      const result = await api.run(SCRIPT);
-      setSelected(String(result.id));
-      await list.reload();
-      setMessage(`Windows injection hunt #${result.id} completed.`);
-    } catch (e) { setMessage(e.message); }
-    finally { setRunning(false); }
+    setMessage("");
+    try { await start(SCRIPT); } catch (e) { setMessage(e.message); }
   }
 
   if (list.loading && !list.data) return <Loading />;
@@ -81,7 +78,8 @@ export default function InjectionAnalysis() {
         <button className="btn primary" onClick={run} disabled={running}>{running ? "Running hunt…" : "Run Windows injection hunt"}</button>
       </div>
 
-      {message && <Notice kind={message.includes("completed") ? "ok" : "err"}>{message}</Notice>}
+      {(message || jobError) && <Notice kind={(message || jobError).includes("completed") ? "ok" : "err"}>{message || jobError}</Notice>}
+      {job && !["complete", "error", "partial", "cancelled"].includes(job.status) && <div className="panel" style={{ marginBottom: 12 }}><div className="panel-b"><strong>Windows injection hunt is running on the server.</strong><div className="muted-copy">You can change tabs without cancelling it. Status: {job.status} · {job.progress ?? 0}%</div></div></div>}
 
       <div className="injection-alert">
         <span className="badge sev-high">DLL / INJECTION</span>

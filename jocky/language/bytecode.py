@@ -86,24 +86,62 @@ def _get_signing_key() -> bytes:
 
 # ── Compilation ────────────────────────────────────────────────────────────────
 
-def compile_investigation(investigation: Investigation) -> bytes:
+def compile_investigation(
+    investigation: Investigation,
+    *,
+    toolchain_version: str = "1.x",
+    ir_version: str = "1.0",
+    target: str = "portable",
+    deterministic: bool = False,
+    source_hash: str | None = None,
+    ir_hash: str | None = None,
+    opcodes: list[dict] | None = None,
+    transformation_profile: str = "none",
+    transformation_seed: str | None = None,
+    transformation_id: str | None = None,
+    transformation_input_hash: str | None = None,
+    transformation_output_hash: str | None = None,
+    transformation_changes: list[str] | None = None,
+    build_id: str | None = None,
+) -> bytes:
     """
     Compile an Investigation IR into signed bytecode.
     Returns the raw bytecode blob.
     """
-    opcodes = _flatten_commands(investigation.commands)
+    opcodes = list(opcodes) if opcodes is not None else _flatten_commands(investigation.commands)
     if len(opcodes) > _MAX_OPCODES:
         raise BytecodeError(
             f"Investigation produces too many bytecode operations (max {_MAX_OPCODES})."
         )
 
     header = {
-        "magic":         MAGIC,
-        "version":       VERSION,
-        "name":          investigation.name,
-        "compiled_at":   datetime.now(timezone.utc).isoformat(),
-        "command_count": len(opcodes),
+        "magic":            MAGIC,
+        "version":          VERSION,
+        "name":             investigation.name,
+        "compiled_at":      None if deterministic else datetime.now(timezone.utc).isoformat(),
+        "command_count":    len(opcodes),
+        "toolchain_version": toolchain_version,
+        "ir_version":       ir_version,
+        "target":            target,
+        "deterministic":    bool(deterministic),
+        "transformation_profile": transformation_profile,
     }
+    if source_hash is not None:
+        header["source_hash"] = source_hash
+    if ir_hash is not None:
+        header["ir_hash"] = ir_hash
+    if transformation_seed is not None:
+        header["transformation_seed"] = transformation_seed
+    if transformation_id is not None:
+        header["transformation_id"] = transformation_id
+    if transformation_input_hash is not None:
+        header["transformation_input_hash"] = transformation_input_hash
+    if transformation_output_hash is not None:
+        header["transformation_output_hash"] = transformation_output_hash
+    if transformation_changes is not None:
+        header["transformation_changes"] = list(transformation_changes)
+    if build_id is not None:
+        header["build_id"] = build_id
 
     header_bytes = json.dumps(header, separators=(",", ":")).encode("utf-8")
     body_bytes   = json.dumps(opcodes, separators=(",", ":")).encode("utf-8")
@@ -227,6 +265,38 @@ def verify_and_load(blob: bytes) -> tuple[dict, list[dict]]:
             raise BytecodeError("Bytecode investigation name is invalid.")
         if not isinstance(header.get("command_count"), int) or header["command_count"] < 0:
             raise BytecodeError("Bytecode command count is invalid.")
+        if "toolchain_version" in header and (
+            not isinstance(header["toolchain_version"], str)
+            or len(header["toolchain_version"]) > 50
+        ):
+            raise BytecodeError("Bytecode toolchain version is invalid.")
+        if "ir_version" in header and (
+            not isinstance(header["ir_version"], str) or len(header["ir_version"]) > 30
+        ):
+            raise BytecodeError("Bytecode IR version is invalid.")
+        if "target" in header and header["target"] not in {"portable", "windows", "ubuntu"}:
+            raise BytecodeError("Bytecode target is invalid.")
+        if "deterministic" in header and not isinstance(header["deterministic"], bool):
+            raise BytecodeError("Bytecode deterministic flag is invalid.")
+        if "transformation_profile" in header:
+            if not isinstance(header["transformation_profile"], str) or len(header["transformation_profile"]) > 50:
+                raise BytecodeError("Bytecode transformation profile is invalid.")
+        for value_name in ("transformation_id", "transformation_input_hash", "transformation_output_hash"):
+            if value_name in header:
+                value = header[value_name]
+                if not isinstance(value, str) or len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+                    raise BytecodeError(f"Bytecode {value_name} is invalid.")
+        if "transformation_seed" in header and (not isinstance(header["transformation_seed"], str) or len(header["transformation_seed"]) > 256):
+            raise BytecodeError("Bytecode transformation seed is invalid.")
+        if "build_id" in header:
+            value = header["build_id"]
+            if not isinstance(value, str) or len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+                raise BytecodeError("Bytecode build_id is invalid.")
+        for hash_name in ("source_hash", "ir_hash"):
+            if hash_name in header:
+                value = header[hash_name]
+                if not isinstance(value, str) or len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+                    raise BytecodeError(f"Bytecode {hash_name} is invalid.")
 
         # Validate header fields.
         if header.get("magic") != MAGIC:
@@ -399,6 +469,12 @@ def disassemble(blob: bytes) -> str:
         f"JOCKY Bytecode v{header['version']}",
         f"Investigation : {header['name']}",
         f"Compiled at   : {header['compiled_at']}",
+        f"Toolchain     : {header.get('toolchain_version', 'legacy')}",
+        f"IR version    : {header.get('ir_version', 'legacy')}",
+        f"Target        : {header.get('target', 'legacy')}",
+        f"Deterministic : {header.get('deterministic', False)}",
+        f"Source hash   : {header.get('source_hash', 'n/a')}",
+        f"IR hash       : {header.get('ir_hash', 'n/a')}",
         f"Opcodes       : {header['command_count']}",
         f"Signature     : OK",
         "",

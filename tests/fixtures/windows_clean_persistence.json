@@ -1,0 +1,25 @@
+{
+  "system_info": {"hostname":"CLEAN-GAMING-PC","is_admin":false,"is_elevated":false,"integrity_level":"medium"},
+  "services": {"services":[
+    {"service_name":"Windows Defender","executable":"C:\\Windows\\System32\\svchost.exe","writable_path":false,"start_mode":"auto","verification":{"exists":true,"signature_status":"valid","publisher":"Microsoft Corporation","trusted_publisher":true}},
+    {"service_name":"Gaming Updater","executable":"C:\\Program Files\\Game\\updater.exe","writable_path":false,"start_mode":"auto","verification":{"exists":true,"signature_status":"valid","publisher":"Google LLC","trusted_publisher":true}}
+  ],"count":2},
+  "startup_items": {"items":[
+    {"name":"desktop.ini","command":"C:\\Users\\User\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\desktop.ini","type":"startup_folder"},
+    {"name":"Send to OneNote.lnk","command":"C:\\Users\\User\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\Send to OneNote.lnk","type":"startup_folder"},
+    {"name":"Epic Games","command":"C:\\Program Files (x86)\\Epic Games\\Launcher\\Portal\\Binaries\\Win64\\EpicGamesLauncher.exe","type":"registry_run_key","verification":{"exists":true,"signature_status":"valid","publisher":"Epic Games, Inc.","trusted_publisher":true}}
+  ],"count":3},
+  "scheduled_tasks": {"tasks":[
+    {"name":"\\ZoomUpdateTask","task_to_run":"C:\\Users\\User\\AppData\\Roaming\\Zoom\\bin\\Zoom.exe /update","run_as":"User","recent_creation":false,"verification":{"exists":true,"signature_status":"valid","publisher":"Zoom Video Communications, Inc.","trusted_publisher":true},"path_risk_score":2}
+  ],"count":1},
+  "wmi_event_subscriptions": {"records":[],"count":0},
+  "ifeo_persistence": {"records":[],"count":0},
+  "winlogon_persistence": {"records":[],"count":0},
+  "appinit_persistence": {"records":[],"count":0},
+  "com_hijack_persistence": {"records":[],"count":0},
+  "bits_persistence": {"records":[],"count":0},
+  "all_users_startup": {"records":[],"count":0},
+  "browser_extensions": {"records":[],"count":0},
+  "office_addins": {"records":[],"count":0},
+  "lsa_auth_packages": {"records":[{"package":"msv1_0"}],"count":1}
+}

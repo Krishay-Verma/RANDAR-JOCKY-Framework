@@ -15,6 +15,7 @@ import re
 from typing import Any
 
 from jocky.analysis.finding import Finding
+from jocky.analysis.persistence_enrichment import is_executable_path
 
 # ── Pattern libraries ──────────────────────────────────────────────────────────
 
@@ -51,133 +52,110 @@ _HIGH_CONNECTION_THRESHOLD = 15
 
 # ── Rule: unusual_scheduled_tasks ─────────────────────────────────────────────
 
+def _verification(row: dict[str, Any]) -> dict[str, Any]:
+    return row.get("verification") or {}
+
+
+def _score_persistence(row: dict[str, Any], *, kind: str) -> tuple[int, list[str]]:
+    score = 0
+    signals: list[str] = []
+    command = str(row.get("task_to_run") or row.get("resolved_target") or row.get("command") or row.get("executable") or "")
+    p = row.get("path_normalized") or command.casefold()
+    risk = int(row.get("path_risk_score") or 0)
+    if risk:
+        score += risk; signals.append("user-writable-style path")
+    v = _verification(row)
+    status = str(v.get("signature_status") or "unknown").casefold()
+    trusted = bool(v.get("trusted_publisher"))
+    if status in {"invalid", "hashmismatch", "unknownerror"}:
+        score += 4; signals.append("invalid signature")
+    elif status in {"nottrusted", "notsigned", "unsigned"}:
+        score += 3; signals.append("unsigned or untrusted signature")
+    elif status in {"valid", "validcatalogsigned"} and trusted:
+        score -= 3; signals.append("valid trusted publisher")
+    elif trusted:
+        score -= 1
+    if row.get("unquoted_path"):
+        score += 2; signals.append("unquoted service path")
+    if _DOUBLE_EXT_RE.search(command):
+        score += 3; signals.append("double extension")
+    if _PS_ENCODED_RE.search(command):
+        score += 4; signals.append("encoded PowerShell")
+    if re.search(r"(?i)\b(?:-enc|-encodedcommand|frombase64string|mshta|rundll32|regsvr32)\b", command):
+        score += 2; signals.append("script/LOLBin style arguments")
+    if row.get("recent_creation"):
+        score += 2; signals.append("recently created")
+    if str(row.get("run_as") or row.get("account") or "").casefold() in {"system", "localsystem", "nt authority\\system"}:
+        score += 1; signals.append("runs as SYSTEM")
+    if row.get("verification", {}).get("exists") is False:
+        score += 2; signals.append("target missing")
+    if kind == "startup" and not is_executable_path(str(row.get("resolved_target") or row.get("command") or "")):
+        return 0, ["non-executable startup item"]
+    return max(score, 0), signals
+
+
+def _severity_for_score(score: int) -> str:
+    if score >= 8:
+        return "high"
+    if score >= 5:
+        return "medium"
+    if score >= 3:
+        return "review_recommended"
+    return "informational"
+
+
 def check_unusual_scheduled_tasks(evidence: dict[str, Any]) -> list[Finding]:
-    """
-    Flag scheduled tasks that exhibit common persistence/evasion patterns:
-      - Command running from a temp or user-writable directory
-      - Double file extension in the command
-      - Base64-encoded PowerShell command
-    """
+    """Score scheduled tasks using multiple weak signals; path alone is never high."""
     findings: list[Finding] = []
     tasks = evidence.get("scheduled_tasks", {}).get("tasks", [])
-
+    task_creation = {}
+    for event in evidence.get("windows_event_logs", {}).get("events", []) or []:
+        if event.get("event_type") != "scheduled_task_created":
+            continue
+        data = event.get("data") or {}
+        name = data.get("TaskName") or data.get("Task Name") or data.get("TaskNameXml")
+        if name:
+            task_creation[str(name).casefold()] = event.get("timestamp")
     for task in tasks:
-        # Normalise the command field across Windows/Linux schemas.
-        command = (task.get("task_to_run") or task.get("entry") or "").lower()
-        name = task.get("name") or task.get("entry") or "unknown"
-
+        command = str(task.get("task_to_run") or task.get("entry") or "").strip()
         if not command:
             continue
-
-        for fragment in _SUSPICIOUS_PATH_FRAGMENTS:
-            if fragment in command:
-                findings.append(Finding(
-                    rule_name="unusual_scheduled_tasks",
-                    severity="high",
-                    summary=f"Scheduled task runs from suspicious directory",
-                    reason=(
-                        f"Task '{name}' executes from '{fragment}' — a writable "
-                        "location commonly used for malware staging or persistence."
-                    ),
-                    related_evidence={"task": task},
-                ))
-                break
-
-        if _DOUBLE_EXT_RE.search(command):
-            findings.append(Finding(
-                rule_name="unusual_scheduled_tasks",
-                severity="high",
-                summary="Scheduled task uses double file extension",
-                reason=(
-                    f"Task '{name}' command path has a double extension "
-                    "(e.g. .pdf.exe) — a common technique to disguise executables."
-                ),
-                related_evidence={"task": task},
-            ))
-
-        if _PS_ENCODED_RE.search(command):
-            findings.append(Finding(
-                rule_name="unusual_scheduled_tasks",
-                severity="critical",
-                summary="Scheduled task uses encoded PowerShell",
-                reason=(
-                    f"Task '{name}' uses a base64-encoded PowerShell command — "
-                    "a strong obfuscation indicator."
-                ),
-                related_evidence={"task": task},
-            ))
-
+        if task.get("name") and str(task.get("name")).casefold() in task_creation:
+            task = dict(task)
+            task["creation_time"] = task_creation[str(task.get("name")).casefold()]
+            task["recent_creation"] = True
+        score, signals = _score_persistence(task, kind="task")
+        if score < 3:
+            continue
+        sev = _severity_for_score(score)
+        name = task.get("name") or "unknown"
+        findings.append(Finding(
+            "unusual_scheduled_tasks", sev,
+            f"Scheduled task '{name}' has {len(signals)} persistence risk signal(s)",
+            f"Risk score {score}: {', '.join(signals)}. A temporary/AppData path by itself is not sufficient for a high-severity finding.",
+            {"task_name": name, "path": task.get("path_normalized") or command, "score": score, "signals": signals, "task": task, "parent_folder_context": task.get("parent_folder_context")},
+        ))
     return findings
 
 
-# ── Rule: suspicious_startup_items ────────────────────────────────────────────
-
 def check_suspicious_startup_items(evidence: dict[str, Any]) -> list[Finding]:
-    """
-    Flag startup items whose command path points outside standard
-    system directories, or whose filename uses double extensions.
-    """
+    """Filter non-executables and score startup entries from several weak signals."""
     findings: list[Finding] = []
-    items = evidence.get("startup_items", {}).get("items", [])
-
-    _TRUSTED_PREFIXES_WIN = (
-        "c:\\windows\\", "c:\\program files\\",
-        "c:\\program files (x86)\\",
-    )
-    _TRUSTED_PREFIXES_LIN = ("/usr/", "/bin/", "/sbin/", "/opt/")
-
-    for item in items:
-        command = (item.get("command") or "").strip()
-        name = item.get("name", "unknown")
-        item_type = item.get("type", "")
-        command_lower = command.lower().lstrip('"\' ')
-
-        if not command:
+    for item in evidence.get("startup_items", {}).get("items", []):
+        target = item.get("resolved_target") or item.get("command") or ""
+        if not is_executable_path(str(target)):
             continue
-
-        # Check path origin for registry run keys and startup folder items.
-        if item_type in ("registry_run_key", "startup_folder"):
-            in_trusted = (
-                any(command_lower.startswith(p) for p in _TRUSTED_PREFIXES_WIN)
-                or any(command_lower.startswith(p) for p in _TRUSTED_PREFIXES_LIN)
-            )
-            if not in_trusted and command:
-                findings.append(Finding(
-                    rule_name="suspicious_startup_items",
-                    severity="medium",
-                    summary=f"Startup item runs from non-standard location",
-                    reason=(
-                        f"'{name}' ({item_type}) points to '{command}' — "
-                        "outside standard system directories. "
-                        "Verify this is a legitimate application."
-                    ),
-                    related_evidence={"item": item},
-                ))
-
-        if _DOUBLE_EXT_RE.search(command):
-            findings.append(Finding(
-                rule_name="suspicious_startup_items",
-                severity="high",
-                summary="Startup item has double file extension",
-                reason=(
-                    f"Startup item '{name}' uses a double file extension — "
-                    "a common masquerading technique."
-                ),
-                related_evidence={"item": item},
-            ))
-
-        if _PS_ENCODED_RE.search(command_lower):
-            findings.append(Finding(
-                rule_name="suspicious_startup_items",
-                severity="critical",
-                summary="Startup item uses encoded PowerShell",
-                reason=(
-                    f"Startup item '{name}' uses base64-encoded PowerShell — "
-                    "a strong obfuscation and evasion indicator."
-                ),
-                related_evidence={"item": item},
-            ))
-
+        score, signals = _score_persistence(item, kind="startup")
+        if score < 3:
+            continue
+        sev = _severity_for_score(score)
+        name = item.get("name") or "unknown"
+        findings.append(Finding(
+            "suspicious_startup_items", sev,
+            f"Startup item '{name}' has {len(signals)} persistence risk signal(s)",
+            f"Risk score {score}: {', '.join(signals)}. Being outside a Windows system directory is not suspicious by itself.",
+            {"name": name, "path": item.get("path_normalized") or target, "score": score, "signals": signals, "item": item},
+        ))
     return findings
 
 

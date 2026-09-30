@@ -1,3 +1,0 @@
-#path	conn
-#fields	ts	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto
-1710000000	10.0.0.2	50000	1.1.1.1	443	tcp

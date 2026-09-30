@@ -62,7 +62,7 @@ class Report:
     report_hash: Optional[str] = None   # SHA-256 of canonical report content
     source: dict = field(default_factory=dict)  # local/agent provenance metadata
     product_name: str = "RANDAR"
-    product_version: str = "1.9.2"
+    product_version: str = "3.0.0"
     dsl_name: str = "JOCKY"
     dsl_version: str = "1.5"
     bytecode_hash: Optional[str] = None
@@ -71,7 +71,11 @@ class Report:
     termination_reason: Optional[str] = None
     elapsed_ms: int = 0
     resource_usage: dict = field(default_factory=dict)
-    integrity_version: int = 4
+    software_summary: dict = field(default_factory=dict)
+    elevation: dict = field(default_factory=dict)
+    coverage: dict = field(default_factory=dict)
+    summary: dict = field(default_factory=dict)
+    integrity_version: int = 6
 
 
 def compute_report_hash(report: "Report") -> str:
@@ -79,6 +83,12 @@ def compute_report_hash(report: "Report") -> str:
     data = asdict(report)
     data["report_hash"] = None
     integrity_version = data.get("integrity_version", 1)
+    if integrity_version < 6:
+        data.pop("elevation", None)
+        data.pop("coverage", None)
+        data.pop("summary", None)
+    if integrity_version < 5:
+        data.pop("software_summary", None)
     if integrity_version < 4:
         data.pop("execution_status", None)
         data.pop("termination_reason", None)

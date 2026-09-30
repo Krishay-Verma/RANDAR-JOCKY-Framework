@@ -247,7 +247,14 @@ def import_job_result(agent_id: str, job_id: str) -> dict:
         "script_hash": r.get("script_hash"),
         "source": {"type": "agent", "agent_id": agent_id, "job_id": job_id},
     }
+    from jocky.analysis.software_catalog import annotate_evidence, summarize as summarize_software
     from jocky.reports.report import Report, CollectorResult, AnalysisResult, Finding
+    evidence_map = {cr.get("target"): cr.get("data") for cr in report.get("collector_results", []) if cr.get("status") == "success" and cr.get("data") is not None}
+    annotate_evidence(evidence_map)
+    for cr in report.get("collector_results", []):
+        if cr.get("target") in evidence_map:
+            cr["data"] = evidence_map[cr.get("target")]
+    report["software_summary"] = summarize_software(evidence_map)
     report_model = Report(
         investigation_name=report["investigation_name"],
         endpoint_hostname=report["endpoint_hostname"],
@@ -261,11 +268,12 @@ def import_job_result(agent_id: str, job_id: str) -> dict:
         script_hash=report["script_hash"],
         source=report["source"],
         product_name=report.get("product_name", "RANDAR"),
-        product_version=report.get("product_version", "1.9.2"),
+        product_version=report.get("product_version", "3.0.0"),
         dsl_name=report.get("dsl_name", "JOCKY"),
         dsl_version=report.get("dsl_version", "1.5"),
         bytecode_hash=report.get("bytecode_hash"),
         timeline=report.get("timeline", []),
+        software_summary=report.get("software_summary", {}),
         integrity_version=report.get("integrity_version", 1),
     )
     report["report_hash"] = compute_report_hash(report_model)

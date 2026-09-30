@@ -9,16 +9,18 @@ Protected endpoints — investigator token required.
 """
 
 import base64
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from jocky.api.auth import verify_token
+from jocky.reports.forensic_scan import persist_forensic_scan
 from jocky.language.bytecode import BytecodeError, compile_investigation, disassemble, verify_and_load
+from jocky.language.compiler import CompilerError, compile_source
 from jocky.language.interpreter import InterpreterError, run_investigation
-from jocky.language.lexer import LexError, tokenize
-from jocky.language.parser import ParseError, parse
+from jocky.language.execution import ExecutionAdapterError, execute_investigation
 
 bytecode_router = APIRouter(
     dependencies=[Depends(verify_token)],
@@ -28,10 +30,22 @@ bytecode_router = APIRouter(
 
 class ScriptRequest(BaseModel):
     script: str = Field(min_length=1, max_length=20_000)
+    target: str = Field(default="portable", pattern=r"^(portable|windows|ubuntu)$")
+    deterministic: bool = False
+    transformation_profile: str = Field(default="none", pattern=r"^(none|deterministic|randomized|reproducible-randomized|compatibility-preserving|automated-obfuscation)$")
+    transformation_seed: str | None = Field(default=None, max_length=256)
 
 
 class BytecodeRequest(BaseModel):
     bytecode_b64: str = Field(min_length=1, max_length=400_000)
+
+
+class RuntimeExecutionRequest(BaseModel):
+    script: str = Field(min_length=1, max_length=20_000)
+    target: str = Field(default="portable", pattern=r"^(portable|windows|ubuntu)$")
+    adapter: str = Field(default="jocky-interpreter", pattern=r"^jocky-interpreter$")
+    transformation_profile: str = Field(default="none", pattern=r"^(none|deterministic|randomized|reproducible-randomized|compatibility-preserving|automated-obfuscation)$")
+    transformation_seed: str | None = Field(default=None, max_length=256)
 
 
 # ── Compile ────────────────────────────────────────────────────────────────────
@@ -46,30 +60,155 @@ def compile_script_to_bytecode(request: ScriptRequest) -> dict:
     detected and rejected at execution time.
     """
     try:
-        tokens = tokenize(request.script)
-        investigation = parse(tokens)
-    except LexError as exc:
-        raise HTTPException(status_code=400, detail=f"Lexer error: {exc}")
-    except ParseError as exc:
-        raise HTTPException(status_code=400, detail=f"Parser error: {exc}")
-
-    try:
-        blob = compile_investigation(investigation)
-        header, opcodes = verify_and_load(blob)  # round-trip integrity check
-    except BytecodeError as exc:
+        artifact = compile_source(
+            request.script,
+            target=request.target,
+            deterministic=request.deterministic,
+            transformation_profile=request.transformation_profile,
+            transformation_seed=request.transformation_seed,
+        )
+        blob = artifact.bytecode
+        header, opcodes = artifact.header, artifact.opcodes
+    except (CompilerError, BytecodeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     b64 = base64.b64encode(blob).decode("ascii")
 
     return {
-        "investigation_name": investigation.name,
+        "investigation_name": header["name"],
         "bytecode_b64":       b64,
         "bytecode_size_bytes": len(blob),
         "opcode_count":       len(opcodes),
         "compiled_at":        header["compiled_at"],
         "signature":          "HMAC-SHA256",
         "version":            header["version"],
+        "toolchain_version":  header.get("toolchain_version"),
+        "ir_version":         header.get("ir_version"),
+        "target":             header.get("target"),
+        "deterministic":      header.get("deterministic", False),
+        "source_hash":        header.get("source_hash"),
+        "ir_hash":            header.get("ir_hash"),
+        "build_id":           artifact.build_id,
+        "artifact_hash":      artifact.artifact_hash,
+        "transformation_profile": artifact.transformation_profile,
+        "transformation_id":  artifact.transformation_id,
+        "transformation_seed": header.get("transformation_seed"),
+        "transformation_changes": list(artifact.transformation_changes),
+    }
+
+
+# ── Controlled runtime ────────────────────────────────────────────────────────
+
+@bytecode_router.post("/api/runtime/execute")
+def execute_runtime(request: RuntimeExecutionRequest) -> dict:
+    """Compile and execute through the V2.3 controlled runtime abstraction."""
+    try:
+        artifact = compile_source(
+            request.script, target=request.target, deterministic=True,
+            transformation_profile=request.transformation_profile,
+            transformation_seed=request.transformation_seed,
+        )
+        investigation = _opcodes_to_ir(artifact.header["name"], artifact.opcodes)
+        result, telemetry = execute_investigation(
+            investigation, adapter=request.adapter, target=request.target
+        )
+    except (CompilerError, BytecodeError, ExecutionAdapterError, InterpreterError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {
+        "investigation_name": artifact.header["name"],
+        "build_id": artifact.build_id,
+        "artifact_hash": artifact.artifact_hash,
+        "transformation_profile": artifact.transformation_profile,
+        "execution_status": result.execution_status,
+        "elapsed_ms": result.elapsed_ms,
+        "collector_count": len(result.collector_results),
+        "findings_count": len(result.findings),
+        "runtime": telemetry.to_dict(),
+        "collectors": [
+            {"target": c.target, "status": c.status, "duration_ms": c.duration_ms, "record_count": c.record_count}
+            for c in result.collector_results
+        ],
+        "findings": [
+            {"rule_name": f.rule_name, "severity": f.severity, "summary": f.summary}
+            for f in result.findings
+        ],
+    }
+
+
+# ── Memory forensics ───────────────────────────────────────────────────────────
+
+@bytecode_router.post("/api/memory-forensics/scan")
+def memory_forensics_scan() -> dict:
+    """Run a bounded memory scan and persist it as a first-class investigation."""
+    import time
+    from jocky.collectors.registry import get_collector
+    from jocky.analysis.memory_forensics import build_memory_forensics, build_memory_forensics_findings
+    from jocky.analysis.registry import get_rule
+    from jocky.analysis.software_catalog import annotate_evidence, summarize as summarize_software
+
+    started_mono = time.monotonic()
+    started_at = datetime.now(timezone.utc)
+    evidence = {}
+    errors = []
+    for target in ("processes", "modules", "threads", "memory_regions"):
+        try:
+            evidence[target] = get_collector(target)()
+        except Exception as exc:
+            evidence[target] = {"error": str(exc), "supported": False}
+            errors.append({"collector": target, "error": str(exc)})
+
+    annotate_evidence(evidence)
+    report = build_memory_forensics(evidence)
+    report["software_summary"] = summarize_software(evidence)
+    findings = build_memory_forensics_findings(report)
+    analysis_results = [{"target": "memory_forensics_correlation", "status": "success", "finding_count": len(findings)}]
+    for rule_name in (
+        "in_memory_execution_indicators",
+        "process_hollowing_indicators",
+        "reflective_load_indicators",
+        "thread_hijacking_indicators",
+    ):
+        try:
+            rule_findings = get_rule(rule_name)(evidence)
+            findings.extend(rule_findings)
+            analysis_results.append({"target": rule_name, "status": "success", "finding_count": len(rule_findings)})
+        except Exception as exc:
+            errors.append({"rule": rule_name, "error": str(exc)})
+            analysis_results.append({"target": rule_name, "status": "error", "finding_count": 0, "error": str(exc)})
+
+    finished_at = datetime.now(timezone.utc)
+    elapsed_ms = int((time.monotonic() - started_mono) * 1000)
+    finding_dicts = [_finding_to_dict(f) for f in findings]
+    investigation_id, stored_report = persist_forensic_scan(
+        investigation_name="Memory Forensics Scan",
+        scan_type="memory",
+        evidence=evidence,
+        findings=finding_dicts,
+        started_at=started_at,
+        finished_at=finished_at,
+        elapsed_ms=elapsed_ms,
+        collector_errors=errors,
+        analysis_results=analysis_results,
+        snapshot_hash=report.get("snapshot_hash"),
+    )
+    report["findings"] = finding_dicts
+    report["finding_count"] = len(findings)
+    report["collector_errors"] = errors
+    report["elapsed_ms"] = elapsed_ms
+    report["investigation_id"] = investigation_id
+    report["persisted"] = True
+    return report
+
+
+def _finding_to_dict(finding):
+    return {
+        "rule_name": finding.rule_name, "severity": finding.severity,
+        "summary": finding.summary, "reason": finding.reason,
+        "related_evidence": finding.related_evidence,
+        "limitations": finding.limitations, "next_check": finding.next_check,
+        "evidence_refs": finding.evidence_refs,
     }
 
 
@@ -125,16 +264,20 @@ def execute_bytecode(request: BytecodeRequest) -> dict:
         )
 
     try:
-        result = run_investigation(investigation)
-    except InterpreterError as exc:
+        result, telemetry = execute_investigation(
+            investigation, target=header.get("target", "portable")
+        )
+    except (InterpreterError, ExecutionAdapterError) as exc:
         raise HTTPException(status_code=400, detail=f"Execution error: {exc}")
 
     return {
         "investigation_name": header["name"],
         "collector_count":    len(result.collector_results),
         "findings_count":     len(result.findings),
+        "execution_status":   result.execution_status,
+        "elapsed_ms":         result.elapsed_ms,
         "collectors": [
-            {"target": cr.target, "status": cr.status}
+            {"target": cr.target, "status": cr.status, "duration_ms": cr.duration_ms}
             for cr in result.collector_results
         ],
         "findings": [
@@ -145,6 +288,7 @@ def execute_bytecode(request: BytecodeRequest) -> dict:
             }
             for f in result.findings
         ],
+        "runtime": telemetry.to_dict(),
     }
 
 
@@ -224,3 +368,39 @@ def _opcodes_to_ir(name: str, opcodes: list[dict]):
 
     commands = build_commands(opcodes, 0, len(opcodes))
     return Investigation(name=name, commands=commands)
+
+class TransformationExperimentRequest(BaseModel):
+    script: str = Field(min_length=1, max_length=20_000)
+    target: str = Field(default="portable", pattern=r"^(portable|windows|ubuntu)$")
+    profile: str = Field(default="automated-obfuscation", pattern=r"^(deterministic|randomized|reproducible-randomized|compatibility-preserving|automated-obfuscation)$")
+    seed: str | None = Field(default=None, max_length=256)
+    deterministic: bool = True
+
+
+@bytecode_router.post("/api/transformations/experiments")
+def run_transformation_experiment_route(request: TransformationExperimentRequest) -> dict:
+    """Compile baseline + transformed artifacts and record equivalence evidence."""
+    from jocky.language.experiments import experiment_dict, run_transformation_experiment
+    from jocky.storage.database import save_transformation_experiment
+    try:
+        record = run_transformation_experiment(
+            request.script, target=request.target, profile=request.profile,
+            seed=request.seed, deterministic=request.deterministic,
+        )
+    except (CompilerError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    payload = experiment_dict(record)
+    save_transformation_experiment(payload)
+    return payload
+
+
+@bytecode_router.get("/api/transformations/experiments")
+def list_transformation_experiments_route(limit: int = 100) -> list[dict]:
+    from jocky.storage.database import list_transformation_experiments
+    return list_transformation_experiments(limit)
+
+
+@bytecode_router.get("/api/transformations/experiments/summary")
+def transformation_experiment_summary_route() -> dict:
+    from jocky.storage.database import transformation_experiment_summary
+    return transformation_experiment_summary()

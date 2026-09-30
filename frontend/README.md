@@ -51,3 +51,8 @@ GET /api/catalog
 ```
 
 This keeps the investigation editor aligned with the executable engine.
+
+
+## V2.3 Runtime
+
+The console includes a Runtime view for controlled JOCKY execution and structured execution telemetry.

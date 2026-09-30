@@ -18,6 +18,21 @@ investigation "Domain Expansion Triage" {
     collect modules;
     collect threads;
     collect memory_regions;
+  collect driver_inventory;
+    collect wmi_event_subscriptions;
+    collect ifeo_persistence;
+    collect winlogon_persistence;
+    collect appinit_persistence;
+    collect com_hijack_persistence;
+    collect bits_persistence;
+    collect all_users_startup;
+    collect browser_extensions;
+    collect office_addins;
+    collect lsa_auth_packages;
+    collect advanced_persistence;
+    collect clipboard_metadata;
+    collect browser_history_metadata;
+    collect browser_cookie_metadata;
 
     analyze missing_paths;
     analyze suspicious_processes;
@@ -32,6 +47,10 @@ investigation "Domain Expansion Triage" {
     analyze reflective_load_indicators;
     analyze thread_hijacking_indicators;
     analyze injection_correlation;
+    analyze in_memory_execution_indicators;
+    analyze byovd_driver_indicators;
+    analyze memory_forensics_correlation;
+    analyze driver_forensics_exposure;
     analyze suspicious_dns_queries;
     analyze dns_entropy;
     analyze rare_domains;
@@ -54,11 +73,24 @@ investigation "Domain Expansion Triage" {
     analyze suspicious_services;
     analyze writable_service_paths;
     analyze persistence_correlation;
+    analyze persistence_cross_surface_correlation;
+    analyze persistence_privilege_correlation;
+    analyze service_configuration_anomalies;
     analyze unsigned_loaded_module;
     analyze suspicious_imports;
     analyze high_entropy_module;
     analyze module_disk_mismatch;
     analyze suspicious_writable_module;
+    analyze wmi_event_subscription;
+    analyze ifeo_debugger;
+    analyze winlogon_persistence;
+    analyze appinit_dlls;
+    analyze com_hijack;
+    analyze bits_persistence;
+    analyze all_users_startup;
+    analyze browser_extensions;
+    analyze office_addins;
+    analyze lsa_auth_packages;
 
     report "domain_expansion_triage";
 }

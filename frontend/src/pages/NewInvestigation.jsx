@@ -169,7 +169,7 @@ export default function NewInvestigation() {
         </div>
       </div>
 
-      {cat.data && <div className="panel" style={{ marginBottom: 12 }}><div className="panel-h"><div><h3>Engine capability coverage</h3><div className="panel-subtitle">Counts come from the live collector/rule registry.</div></div></div><div className="panel-b"><div className="grid g3"><div className="kpi"><span>Collectors</span><b>{asArray(cat.data.collectors).length}</b></div><div className="kpi"><span>Analysis rules</span><b>{asArray(cat.data.rules).length}</b></div><div className="kpi"><span>Evidence properties</span><b>{asArray(cat.data.properties).length}</b></div></div><p className="muted-copy" style={{ marginBottom: 0 }}>Use <strong>Domain Expansion Triage</strong> to execute every registered collector and analysis rule in one reproducible investigation. Select network evidence above for the network collector.</p></div></div>}
+      {cat.data && <div className="panel" style={{ marginBottom: 12 }}><div className="panel-h"><div><h3>Engine capability coverage</h3><div className="panel-subtitle">Counts come from the live collector/rule registry.</div></div></div><div className="panel-b"><div className="grid g4"><div className="kpi"><span>Collectors</span><b>{asArray(cat.data.collectors).length}</b></div><div className="kpi"><span>Analysis rules</span><b>{asArray(cat.data.rules).length}</b></div><div className="kpi"><span>Evidence properties</span><b>{asArray(cat.data.properties).length}</b></div><div className="kpi"><span>Software flags</span><b>{asArray(cat.data.software_profiles).length}</b></div></div><p className="muted-copy" style={{ marginBottom: 0 }}>Use <strong>Domain Expansion Triage</strong> to execute every registered collector and analysis rule in one reproducible investigation. Select network evidence above for the network collector.</p></div></div>}
       <div className="grid" style={{ gridTemplateColumns: "minmax(0,1fr) 300px", alignItems: "start" }}>
         <div>
           <ScriptEditor value={script} onChange={setScript} errorLine={errLine} taRef={ta} />
@@ -206,18 +206,18 @@ export default function NewInvestigation() {
         <div className="panel" style={{ position: "sticky", top: 0 }}>
           <div className="panel-h"><h3>Engine reference</h3></div>
           {cat.loading ? <Loading /> : cat.error ? <div className="panel-b"><Notice>{cat.error.message}</Notice></div> : (
-            <div style={{ maxHeight: 520, overflow: "auto" }}>
-              <div className="nav-sec" style={{ padding: "10px 14px 4px" }}>Collectors</div>
+            <div className="engine-reference-scroll" style={{ maxHeight: 520, overflow: "auto" }}>
+              <div className="nav-sec engine-reference-section" style={{ padding: "10px 14px 4px" }}>Collectors</div>
               {asArray(cat.data.collectors).map((c) => (
                 <button key={c.name} className="ref-item" onClick={() => insert(`    collect ${c.name};\n`)}>
                   <b>{c.name}</b><small>{c.description}</small></button>
               ))}
-              <div className="nav-sec" style={{ padding: "10px 14px 4px" }}>Analysis rules</div>
+              <div className="nav-sec engine-reference-section" style={{ padding: "10px 14px 4px" }}>Analysis rules</div>
               {asArray(cat.data.rules).map((r) => (
                 <button key={r.name} className="ref-item" onClick={() => insert(`    analyze ${r.name};\n`)}>
                   <b>{r.name}</b><small>{r.description}</small></button>
               ))}
-              <div className="nav-sec" style={{ padding: "10px 14px 4px" }}>Condition properties</div>
+              <div className="nav-sec engine-reference-section" style={{ padding: "10px 14px 4px" }}>Condition properties</div>
               {asArray(cat.data.properties).map((p) => (
                 <button key={p} className="ref-item" onClick={() => insert(p)}><b>{p}</b></button>
               ))}

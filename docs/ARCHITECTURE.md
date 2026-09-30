@@ -171,7 +171,37 @@ Collector calls execute through bounded worker threads so a stuck collector can 
 
 ---
 
-## 7. Bytecode
+## 7. V2.1 transformation and build identity
+
+`jocky/language/transform.py` is the representation-transformation boundary
+for V2.1. It operates on the existing JOCKY opcode representation before the
+existing HMAC signing step. Profiles are explicit and auditable:
+
+```text
+JOCKY source
+    ↓
+Lexer → Parser → IR
+    ↓
+Transformation pipeline
+    ├── deterministic
+    ├── randomized
+    ├── reproducible-randomized
+    └── compatibility-preserving
+    ↓
+Transformed JOCKY opcodes
+    ↓
+Signed bytecode
+```
+
+Each transformed artifact records source/IR hashes, transformation input and
+output hashes, transformation ID, profile, optional reproducibility seed, and
+a signed build ID. The complete signed blob also receives an artifact SHA-256.
+The transformations change JOCKY representation only; they do not execute or
+modify native processes, kernel state, or security controls.
+
+---
+
+## 9. Bytecode
 
 `jocky/language/bytecode.py`
 
@@ -194,7 +224,7 @@ This is a **tamper-evident serialization of the investigation model**, not a gen
 
 ---
 
-## 8. Collector architecture
+## 9. Collector architecture
 
 Collectors are explicitly registered in:
 
@@ -210,7 +240,7 @@ This prevents the DSL from turning a controlled collector into an unrestricted f
 
 ---
 
-## 9. Analysis architecture
+## 10. Analysis architecture
 
 Analysis rules are explicitly registered in:
 
@@ -232,7 +262,7 @@ Rules do not execute binaries or modify processes.
 
 ---
 
-## 10. Windows telemetry
+## 11. Windows telemetry
 
 The advanced Windows path is divided into independent evidence surfaces:
 
@@ -252,7 +282,7 @@ This makes the final finding a correlation of evidence rather than a single heur
 
 ---
 
-## 11. Network evidence
+## 12. Network evidence
 
 `network_artifacts` normalizes supported DNS/connection evidence.
 
@@ -269,7 +299,7 @@ The collector deliberately does not retain arbitrary packet payloads.
 
 ---
 
-## 12. Persistence
+## 13. Persistence
 
 The case store uses SQLite.
 
@@ -297,7 +327,7 @@ The audit layer maintains append-oriented audit events containing:
 
 ---
 
-## 13. Report construction
+## 14. Report construction
 
 `jocky/reports/builder.py` is the boundary between investigation results and the report model.
 
@@ -316,7 +346,7 @@ This keeps report assembly separate from collection and analysis.
 
 ---
 
-## 14. Report protection
+## 15. Report protection
 
 `jocky/reports/encryptor.py` implements:
 
@@ -336,7 +366,7 @@ A production deployment should use an external key-management solution and expli
 
 ---
 
-## 15. Remote agent
+## 16. Remote agent
 
 The agent communicates through the API using polling.
 
@@ -369,7 +399,7 @@ The agent executes the same JOCKY pipeline as local execution.
 
 ---
 
-## 16. Extension workflow
+## 17. Extension workflow
 
 ### New collector
 
@@ -401,7 +431,7 @@ The agent executes the same JOCKY pipeline as local execution.
 
 ---
 
-## 17. Architectural invariants
+## 18. Architectural invariants
 
 Future changes should preserve:
 
@@ -414,3 +444,38 @@ Future changes should preserve:
 - evidence-driven analysis;
 - report integrity metadata;
 - clear separation between evidence and conclusions.
+
+
+## 8. V2.2 automated transformation research
+
+V2.2 builds on the V2.1 transformation boundary with a controlled research pipeline:
+
+`JOCKY source → IR → baseline artifact → automated representation transformation → transformed artifact → semantic-equivalence validation → experiment registry`
+
+The `automated-obfuscation` profile is intentionally limited to JOCKY-level representation changes: variable identifier representation, serialized JSON/key layout diversification, and provenance metadata. It does not modify native binaries or implement process, kernel, or security-control manipulation.
+
+Each experiment records an experiment ID, source and IR hashes, input/output artifact hashes, transformation ID, compiler version, validation result, and timestamp. The authenticated API exposes experiment creation, history, and summary statistics.
+
+
+## 9. V2.3 controlled execution abstraction
+
+V2.3 introduces a named execution adapter boundary around the existing JOCKY
+interpreter. The production adapter is `jocky-interpreter`; adapter selection
+is validated before execution. Runtime telemetry records lifecycle events,
+target, host platform, duration, resource usage, and forensic artifact labels.
+
+```text
+JOCKY / signed bytecode
+        ↓
+Execution abstraction
+        ↓
+jocky-interpreter adapter
+        ↓
+Existing collector / analysis pipeline
+        ↓
+Execution telemetry + forensic artifacts
+```
+
+The boundary deliberately excludes arbitrary OS command execution, process
+injection, direct syscalls, API unhooking, kernel manipulation, and other
+security-control bypass mechanisms.

@@ -16,8 +16,9 @@ export class AuthError extends Error {
 
 export const AUTH_FAILED_EVENT = "jocky:auth-failed";
 const TIMEOUT_MS = 60_000;
+const RUNTIME_TIMEOUT_MS = 660_000; // V1.9 permits bounded investigations up to 600s. Runtime UI waits slightly longer for the final response.
 
-async function send(method, path, body = null, raw = false, signal = null) {
+async function send(method, path, body = null, raw = false, signal = null, timeoutMs = TIMEOUT_MS) {
   const token = getToken();
   if (!token) throw new AuthError("Not signed in.");
 
@@ -35,7 +36,7 @@ async function send(method, path, body = null, raw = false, signal = null) {
     if (signal.aborted) controller.abort();
     else signal.addEventListener("abort", abortFromCaller, { once: true });
   }
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   options.signal = controller.signal;
 
   let res;
@@ -103,6 +104,14 @@ export const api = {
   bcCompile: (script) => send("POST", "/api/bytecode/compile", { script }),
   bcDisasm: (b64) => send("POST", "/api/bytecode/disasm", { bytecode_b64: b64 }),
   bcExecute: (b64) => send("POST", "/api/bytecode/execute", { bytecode_b64: b64 }),
+  runtimeExecute: (script, target = "portable", adapter = "jocky-interpreter", transformationProfile = "none", transformationSeed = null) => send("POST", "/api/runtime/execute", { script, target, adapter, transformation_profile: transformationProfile, transformation_seed: transformationSeed }, false, null, RUNTIME_TIMEOUT_MS),
+  // Standalone forensic scans run as server-side jobs so route changes cannot interrupt them.
+  forensicJobCreate: (scanType) => send("POST", `/api/forensic-jobs/${encodeURIComponent(scanType)}`, {}),
+  forensicJob: (jobId) => send("GET", `/api/forensic-jobs/${encodeURIComponent(jobId)}`),
+  // Synchronous endpoints remain available for API/automation compatibility.
+  memoryForensicsScan: () => send("POST", "/api/memory-forensics/scan", {}, false, null, RUNTIME_TIMEOUT_MS),
+  driverForensicsScan: () => send("POST", "/api/driver-forensics/scan", {}, false, null, RUNTIME_TIMEOUT_MS),
+  persistenceForensicsScan: () => send("POST", "/api/persistence-forensics/scan", {}, false, null, RUNTIME_TIMEOUT_MS),
   agents: (signal) => send("GET", "/api/agents", null, false, signal),
   registerAgent: (hostname, platform) => send("POST", "/api/agents/register", { hostname, platform }),
   revokeAgent: (a) => send("DELETE", `/api/agents/${id(a)}`),

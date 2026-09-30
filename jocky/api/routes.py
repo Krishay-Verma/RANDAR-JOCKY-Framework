@@ -612,7 +612,7 @@ def _report_from_dict(rj: dict) -> Report:
         ]),
         source=rj.get("source", {}),
         product_name=rj.get("product_name", "RANDAR"),
-        product_version=rj.get("product_version", "1.9.2"),
+        product_version=rj.get("product_version", "2.0.0"),
         dsl_name=rj.get("dsl_name", "JOCKY"),
         dsl_version=rj.get("dsl_version", "1.5"),
         bytecode_hash=rj.get("bytecode_hash"),
@@ -621,5 +621,9 @@ def _report_from_dict(rj: dict) -> Report:
         termination_reason=rj.get("termination_reason"),
         elapsed_ms=rj.get("elapsed_ms", 0),
         resource_usage=rj.get("resource_usage", {}),
+        software_summary=rj.get("software_summary", {}),
+        elevation=rj.get("elevation", {}),
+        coverage=rj.get("coverage", {}),
+        summary=rj.get("summary", {}),
         integrity_version=rj.get("integrity_version", 1),
     )

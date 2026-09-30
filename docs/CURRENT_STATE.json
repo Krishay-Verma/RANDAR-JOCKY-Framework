@@ -1,18 +1,19 @@
 {
   "product": "RANDAR",
-  "release": "1.9.2",
+  "release": "3.0.0",
   "language": "JOCKY",
+  "language_version": "1.5",
   "sih": {
     "event": "Smart India Hackathon 2026",
     "problem_statement": "SIH26148"
   },
   "verified_registries": {
-    "collectors": 17,
-    "analysis_rules": 40
+    "collectors": 32,
+    "analysis_rules": 57
   },
   "regression_tests": {
-    "passed": 91,
+    "passed": 165,
     "failed": 0
   },
-  "documentation_scope": "Current implementation baseline; historical release notes retained separately."
+  "documentation_scope": "Final RANDAR forensic platform: JOCKY toolchain, transformation research, memory/driver forensics, persistence hardening, provenance/integrity, coverage honesty, network evidence, software/kernel context, and privacy-bounded user-context metadata."
 }

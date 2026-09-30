@@ -23,8 +23,11 @@ from fastapi.staticfiles import StaticFiles
 from jocky.api.agent_routes import agent_router, management_router
 from jocky.api.auth import assert_auth_configured
 from jocky.api.bytecode_routes import bytecode_router
+from jocky.api.driver_routes import driver_router
+from jocky.api.persistence_routes import persistence_router
+from jocky.api.forensic_job_routes import router as forensic_job_router
 from jocky.api.routes import protected_router, public_router
-from jocky.storage.database import init_db
+from jocky.storage.database import init_db, init_transformation_experiments
 from jocky.storage.audit import init_audit
 from jocky.api.agent_store import init_persistence as init_agent_persistence
 from jocky.storage.network_sources import init_network_sources
@@ -71,6 +74,7 @@ def _install_windows_disconnect_handler() -> None:
 async def lifespan(_: FastAPI):
     init_db()
     init_network_sources()
+    init_transformation_experiments()
     init_audit()
     init_agent_persistence()
     _install_windows_disconnect_handler()
@@ -81,7 +85,7 @@ app = FastAPI(
     title="RANDAR Investigation API",
     description="Host triage and forensic investigation service. "
                 "All investigation endpoints require a bearer token.",
-    version="1.9.2",
+    version="3.0.0",
     lifespan=lifespan,
     docs_url="/docs" if os.environ.get("RANDAR_DOCS", os.environ.get("JOCKY_DOCS", "true")).lower() != "false" else None,
     redoc_url=None,
@@ -123,6 +127,9 @@ app.include_router(protected_router)
 app.include_router(management_router)
 app.include_router(agent_router)
 app.include_router(bytecode_router)
+app.include_router(driver_router)
+app.include_router(persistence_router)
+app.include_router(forensic_job_router)
 
 if _DIST.is_dir():
     app.mount("/assets", StaticFiles(directory=_DIST / "assets"), name="assets")

@@ -12,6 +12,7 @@ from functools import partial
 from pathlib import Path
 
 from jocky.collectors.file_hash import collect_file_hashes
+from jocky.collectors.drivers import collect_driver_inventory
 from jocky.collectors.local_users import collect_local_users
 from jocky.collectors.memory_regions import collect_memory_regions
 from jocky.collectors.modules import collect_modules
@@ -28,6 +29,13 @@ from jocky.collectors.processes import collect_processes
 from jocky.collectors.scheduled_tasks import collect_scheduled_tasks
 from jocky.collectors.startup_items import collect_startup_items
 from jocky.collectors.system_info import collect_system_info
+from jocky.collectors.user_context import collect_clipboard_metadata, collect_browser_history_metadata, collect_browser_cookie_metadata
+from jocky.collectors.advanced_persistence import (
+    collect_wmi_event_subscriptions, collect_ifeo_persistence, collect_winlogon_persistence,
+    collect_appinit_persistence, collect_com_hijack_persistence, collect_bits_persistence,
+    collect_all_users_startup, collect_browser_extensions, collect_office_addins, collect_lsa_auth_packages,
+    collect_advanced_persistence,
+)
 
 # The one directory file_hash is allowed to read. Anchored to the project
 # root (three levels up from this file), NOT the current working directory,
@@ -57,6 +65,21 @@ _COLLECTORS: dict[str, object] = {
     "modules":             collect_modules,
     "threads":             collect_threads,
     "memory_regions":      collect_memory_regions,
+    "driver_inventory":    collect_driver_inventory,
+    "wmi_event_subscriptions": collect_wmi_event_subscriptions,
+    "ifeo_persistence": collect_ifeo_persistence,
+    "winlogon_persistence": collect_winlogon_persistence,
+    "appinit_persistence": collect_appinit_persistence,
+    "com_hijack_persistence": collect_com_hijack_persistence,
+    "bits_persistence": collect_bits_persistence,
+    "all_users_startup": collect_all_users_startup,
+    "browser_extensions": collect_browser_extensions,
+    "office_addins": collect_office_addins,
+    "lsa_auth_packages": collect_lsa_auth_packages,
+    "advanced_persistence": collect_advanced_persistence,
+    "clipboard_metadata": collect_clipboard_metadata,
+    "browser_history_metadata": collect_browser_history_metadata,
+    "browser_cookie_metadata": collect_browser_cookie_metadata,
 }
 
 

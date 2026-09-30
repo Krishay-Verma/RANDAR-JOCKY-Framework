@@ -17,6 +17,8 @@ import platform
 import sys
 from typing import Any
 
+from jocky.analysis.persistence_enrichment import enrich_record, expand_windows_vars
+
 _MAX_ITEMS = 300
 
 
@@ -61,12 +63,13 @@ def _windows_startup() -> dict[str, Any]:
                     while True:
                         try:
                             name, value, _ = winreg.EnumValue(key, idx)
-                            items.append({
+                            row = {
                                 "source": f"{_hive_name[hive]}\\{key_path}",
                                 "name": name,
-                                "command": value,
+                                "command": expand_windows_vars(str(value)),
                                 "type": "registry_run_key",
-                            })
+                            }
+                            items.append(enrich_record(row, _resolve_executable(str(value))))
                             idx += 1
                             if len(items) >= _MAX_ITEMS:
                                 break
@@ -89,14 +92,30 @@ def _windows_startup() -> dict[str, Any]:
     ):
         if os.path.isdir(folder):
             for fname in os.listdir(folder):
-                items.append({
-                    "source": folder,
-                    "name": fname,
-                    "command": os.path.join(folder, fname),
-                    "type": "startup_folder",
-                })
+                command = os.path.join(folder, fname)
+                row = {"source": folder, "name": fname, "command": command, "type": "startup_folder"}
+                target = _resolve_executable(command)
+                if target:
+                    row["resolved_target"] = target
+                items.append(enrich_record(row, target or command))
 
     return {"items": items, "count": len(items), "platform": "Windows"}
+
+
+def _resolve_executable(command: str) -> str | None:
+    """Resolve a .lnk target without executing the target."""
+    text = expand_windows_vars(str(command or "")).strip().strip('"')
+    if not text.lower().endswith(".lnk"):
+        return text if os.path.splitext(text)[1].casefold() in {".exe", ".com", ".scr", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".jse", ".wsf", ".wsh"} else None
+    if os.name != "nt":
+        return None
+    ps = r'$w=New-Object -ComObject WScript.Shell; $s=$w.CreateShortcut($args[0]); $s.TargetPath'
+    try:
+        proc = __import__("subprocess").run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps, text], capture_output=True, text=True, timeout=5, creationflags=getattr(__import__("subprocess"), "CREATE_NO_WINDOW", 0))
+        target = proc.stdout.strip()
+        return target or None
+    except Exception:
+        return None
 
 
 # ── Linux ──────────────────────────────────────────────────────────────────────

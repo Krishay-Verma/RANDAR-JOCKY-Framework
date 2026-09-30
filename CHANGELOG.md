@@ -1,233 +1,96 @@
-# Changelog
+# V3.0.0 Final
 
-## 1.9.2 — Documentation and v1.9.2 Current-State Baseline
+- Finalized the RANDAR forensic platform on the V2.9 persistence-hardened baseline.
+- Fixed Windows environment-variable expansion when replacement values contain backslashes (`bad escape \W`).
+- Added regression coverage for the exact Startup Items failure shown in the UI.
+- Added privacy-bounded clipboard metadata and browser history/cookie metadata collectors; no clipboard contents, URLs/titles, cookie values, or cookie decryption are returned.
+- Synchronized the Domain Expansion templates with the live collector registry.
+- Preserved the V2.9 persistence hardening: DACL-aware service write checks, deduplication, multi-signal startup/task scoring, executable verification, evidence references, stable finding IDs, coverage/elevation reporting, timeline construction, and expanded persistence collectors.
+- Verified 165 regression tests with 0 failures.
 
-This documentation revision aligns the repository documentation with the implementation present in the v1.9.2 source tree.
+## 2.9.0 — Persistence forensic hardening
 
-### Documentation alignment
-- Documented the live **17-collector** registry.
-- Documented the live **40-rule** analysis registry.
-- Added the current JOCKY language surface, including `where`, boolean conditions and bounded analyst-authored rules.
-- Documented PE metadata, Windows Event Logs, Sysmon, services and network evidence as implemented capabilities.
-- Documented report/evidence integrity metadata and audit events.
-- Documented the remote-agent lifecycle and security boundaries.
-- Clarified that Windows advanced telemetry is read-only and metadata-oriented.
-- Added a dedicated SIH 2026 technical brief.
-- Updated deployment, architecture, DFIR capability, DSL and demonstration documentation.
-- Recorded the current automated regression baseline: **91 tests passed**.
+- Replaced service writable-path heuristics with DACL-aware tri-state inspection (`true` / `false` / `unknown`).
+- Added semantic finding deduplication and deterministic finding IDs.
+- Added Windows environment-variable expansion and Windows-path normalization.
+- Added multi-signal startup/scheduled-task scoring and `.lnk` target resolution.
+- Added SHA-256, Authenticode/publisher/version/timestamp enrichment and opt-in VirusTotal hash lookup.
+- Added WMI, IFEO, Winlogon, AppInit, COM, BITS, all-user Startup, browser extension, Office add-in and LSA authentication-package collectors.
+- Added service unquoted-path and ServiceDll checks.
+- Added evidence record references, mandatory limitations/next checks, evidence-hash verification and report schema validation.
+- Added elevation state, per-collector coverage/confidence, explicit termination reasons, timeline enrichment and top-lead summary.
+- Sysmon absence is now `not_installed`; Windows Event Log truncation/access/no-match states are separated.
+- Added clean/planted Windows persistence fixtures and regression coverage.
 
-## 1.9.2 — RANDAR / Comprehensive Navigation & Cancellation Reliability
+## 2.9.0 — Software context flags, kernel-aware classification & execution reliability
 
-- Fixed intermittent route-render failures caused by stale asynchronous API requests surviving navigation.
-- Added AbortController propagation to shared frontend data loading and cancelled obsolete requests on unmount, route changes and refresh cycles.
-- Prevented overlapping polling requests from racing each other and overwriting current page state.
-- Reworked local investigation cancellation so one polling owner controls the job lifecycle; Cancel no longer competes with the normal status poller.
-- Hardened frontend handling of unexpected API response shapes before array iteration.
-- Hardened modal/evidence callbacks so malformed optional callbacks cannot crash a route render.
-- Extended Windows collector execution budgets to reduce routine PE/module timeout failures while retaining hard bounds.
-- Raised the maximum investigation runtime to 10 minutes while preserving explicit partial-result and cancellation semantics.
-- Added frontend reliability contract tests and retained the complete backend regression suite.
+- Added centralized defensive software classification for common endpoint-security/EDR products, including Microsoft Defender, Kaspersky, CrowdStrike, SentinelOne, Bitdefender, ESET, Sophos, Malwarebytes, Avast, McAfee and Trend Micro.
+- Added anti-cheat context flags for Riot Vanguard, Easy Anti-Cheat, BattlEye, Denuvo Anti-Cheat and FACEIT Anti-Cheat.
+- Added contextual flags for common VPN and virtualization software.
+- Added explicit `KERNEL DRIVER` flags for collected driver records and `KERNEL COMPONENT` flags for processes only when matching driver evidence is actually observed. Product naming alone is never treated as proof of kernel activity.
+- Added software classification metadata to persisted reports and the live capability catalog.
+- Added a Security Software & Kernel Review investigation template.
+- Registered `memory_forensics_correlation` as a live JOCKY analysis rule and synchronized the Memory/Domain Expansion templates.
+- Increased bounded timeouts for legitimately slower Windows collectors such as driver inventory, services, scheduled tasks and local-user inventory.
+- Converted the Injection / PE and Windows Telemetry sidebar hunts to server-side background investigation jobs so their HTTP request is no longer tied to the page lifetime or the 60-second request timeout.
+- Fixed Injection / PE findings so PE-specific rules are included in the displayed result set.
+- Fixed the investigation execution resource strip so metrics have readable separation and wrapping.
+- Fixed a duplicated Evidence Context header in the investigation evidence drawer.
+- Added regression coverage for software classification, kernel evidence correlation, template/registry synchronization, background hunt flow and report integrity metadata.
 
-## 1.9.1 — RANDAR / Reliability Bug Fix
+## 2.8.1 — Background forensic scan continuity
 
-- Fixed local investigation cancellation races so queued jobs cannot resurrect as running jobs.
-- Added a `cancelling` lifecycle state while an active bounded collector unwinds.
-- Fixed the frontend cancellation poll so the analyst sees the terminal cancelled state instead of an overwritten stale status.
-- Fixed an Investigation edit-modal callback bug that could trigger the page error recovery screen.
-- Fixed collector status details so timeout/cancel/error states are never displayed as successful evidence collection.
-- Raised the generic collector timeout to 30 seconds and added bounded 45–60 second profiles for heavier Windows telemetry collectors.
-- Improved live progress reporting so the UI advances while a command is actively executing rather than remaining at the initial 5% marker.
-- Added regression coverage for cancellation races, timeout profiles and active progress updates.
+- Standalone Memory, Driver, and Persistence scans now execute in bounded server-side background workers.
+- Added authenticated `/api/forensic-jobs/{scan_type}` create/status endpoints.
+- Route changes no longer terminate an in-flight forensic scan or its persistence workflow.
+- Forensic workspace pages persist active job IDs in session storage and resume polling when reopened.
+- A transient API/polling failure no longer abandons the server-side job.
+- Existing synchronous forensic scan endpoints remain available for automation/API compatibility.
+- Added regression coverage for background job creation, completion, persistence, and frontend job recovery behavior.
 
-## 1.9.0 — RANDAR / Performance & Reliability
+## 2.8.0 — Forensic scan persistence & reliability
+- Standalone Memory, Driver, and Persistence scans are persisted as investigations.
+- Registered `driver_forensics_exposure` in the live analysis registry.
+- Fixed investigation summary typography and forensic scan pivots.
+- Added V2.8 regression coverage.
 
-- Added bounded pagination for investigation archive listings.
-- Added lazy, server-paged evidence retrieval for large collector datasets.
-- Added per-collector execution timeouts and explicit timeout/cancellation statuses.
-- Added maximum investigation runtime with preserved partial evidence when the runtime limit is reached.
-- Added analyst cancellation for background investigation jobs.
-- Added maximum record/evidence-size bounds with explicit truncation markers.
-- Added execution/resource accounting: elapsed time, collector counts, record counts, evidence bytes, timeouts and truncation.
-- Added V1.9 execution/resource visibility to the console and HTML reports.
-- Added V1.9 regression coverage; full suite verified at 83 passing.
+## 2.7.0 — Investigation navigation & cross-surface correlation
 
-## 1.8.0 — RANDAR / Investigation Experience
+- Fixed Memory/Driver forensics visibility on investigation detail and list views.
+- Added direct Memory/Driver/Persistence investigation pivots.
+- Added wrapped investigation tabs for narrow and wide screens.
+- Added Cross-Surface Correlation workspace.
 
-- Added global evidence search across stored case metadata, findings and collected evidence.
-- Added analyst finding filters for severity, network, injection/PE, persistence and PowerShell.
-- Added contextual evidence drawer from finding evidence references.
-- Added structured finding explanations: what happened, why it was flagged, limitations and recommended next check.
-- Added investigation summary metrics for objects collected, indicators and major evidence domains.
-- Added integrity-version compatibility so V1.6/V1.7 reports remain verifiable after the new explanation fields are introduced.
-- Added V1.8 regression coverage; full suite verified at 78 passing.
+## 2.6.0 — Persistence & Privilege Forensics
 
-## 1.7.0 — RANDAR / Remote Endpoint Operations
+- Added read-only persistence/privilege correlation API, CLI and console workspace.
+- Added cross-surface and privilege correlation rules.
+- Integrated persistence findings into investigation details and list summaries.
+- Fixed investigation-list memory/driver row-scope bug.
 
-- Persistent remote-agent state, capability negotiation, secure job metadata and safe cancellation.
-- Added remote agent capability dashboard and job expiry/signature visibility.
-- RANDAR agent branding with JOCKY DSL compatibility.
+## 2.5.1 — Investigation UI and capability integration hotfix
 
-## V1.6.0 — RANDAR / Evidence & Forensic Integrity
+- Added dedicated Memory Forensics and Driver Forensics tabs to stored investigations.
+- Added memory/driver finding filters and investigation-list status summaries.
+- Added lightweight SQLite JSON projections so the investigations list can surface specialized forensics without shipping full report bodies.
+- Fixed the existing paginated DLL/PE summary, which previously depended on report JSON that the list endpoint intentionally omitted.
+- Added Memory Forensics and Driver Forensics templates and added driver inventory/rules to Domain Expansion Triage.
+- Fixed Engine Reference typography and wrapping so capability names and descriptions no longer run together.
+- Added UI integration regression coverage.
 
-- RANDAR becomes the platform name; JOCKY remains the DSL/bytecode identity.
-- Added evidence timeline, provenance chain, append-only audit log, stable finding IDs and evidence references.
-- Added investigation integrity/audit UI.
+## 2.5.0 — Driver / Kernel Forensics Research Track
 
-## 1.5.0 — Forensics-as-Code DSL
+- Added read-only Windows driver inventory enrichment: loaded state, signer,
+  publisher, version, SHA-256, and vulnerable-driver catalog correlation.
+- Added `/api/driver-forensics/scan` with kernel/security telemetry summary,
+  snapshot hashing, findings, and diagnostics.
+- Added Driver Forensics frontend workspace.
+- Added `driver_forensics_exposure` finding and preserved the existing
+  `byovd_driver_indicators` compatibility rule.
+- Added V2.5 regression coverage.
+- No driver exploitation, kernel modification, callback disabling, or security
+  control manipulation is implemented.
 
-- Added comments, variables, boolean `and` / `or` / `not`, and `where` evidence filtering.
-- Added bounded analyst-authored `rule` blocks with allowlisted finding properties and severities.
-- Extended signed bytecode to preserve and validate V1.5 DSL constructs.
-- Added background execution for long-running investigations so Domain Expansion Triage is not limited by the browser request timeout.
-- Added V1.5 DSL showcase template and regression coverage.
+## 2.4.1 — Memory Forensics Reliability & Reporting
 
-## 1.4.1 — Stability & Full Capability Visibility
-
-- Hardened frontend navigation/data handling and stale async request behavior.
-- Added explicit analysis execution coverage to reports and Investigation Detail, including zero-hit rules.
-- Exposed all specialized investigation capability tabs with explicit not-collected states.
-- Added live collector/rule registry coverage to Dashboard and Investigation Builder.
-- Added the Domain Expansion Triage full-capability template and reproducible example.
-- Preserved report integrity compatibility for pre-1.4.1 reports.
-
-## 1.4.0 — Injection & PE Forensics
-
-- Added bounded read-only `pe_metadata` collector for PE architecture, type, sections, imports, exports, entropy, signature metadata and SHA-256.
-- Added V1.4 PE/module rules: unsigned loaded module, suspicious imports, high entropy, module/disk mismatch, and writable-risk modules.
-- Strengthened injection correlation with static PE import evidence.
-- Added PE / Module investigation view and expanded DLL/injection workspace.
-- Added PE/module section to HTML reporting and V1.4 DSL example.
-- Preserved the read-only safety boundary: no injection, remote-thread creation, arbitrary memory writes, or PE execution.
-
-## 1.2.0 — Final V1.2 maintenance fixes
-
-- Added route-level UI error recovery so a failed page render no longer leaves the console as an unexplained blank view.
-- Network Forensics now displays the actual V1.2 DNS, beaconing, scanning, classification, and process/network findings with expandable supporting evidence.
-- Added process/network correlation to the V1.2 UI and HTML hunting result set.
-- Hardened process/network correlation for IPv6 local endpoints.
-- Expanded regression coverage; full Python suite now passes 42/42 tests.
-
-## [1.2.0] - Network Threat Hunting
-
-- Added passive DNS hunting rules for suspicious queries, entropy, rare domains, TLD patterns, bursts, unusual query types, long/random labels, and tunneling indicators.
-- Added DNS and network beaconing analysis with interval and jitter evidence.
-- Added vertical port scan, horizontal scan, service discovery, and UDP scan indicators.
-- Added network address classification and endpoint process/network/DNS correlation.
-- Added V1.2 DSL example, catalog entries, human-readable UI coverage, and HTML report section.
-- Preserved V1.1 payload-free network evidence boundary and controlled allowlist execution.
-
-# Changelog
-
-## 1.2.0 — Network Threat Hunting
-
-- Added DNS threat-hunting rules, beaconing analysis, network scan/discovery analysis, network classification, and process/network correlation.
-- Added direct V1.2 finding/evidence presentation in Investigation → Network Forensics.
-- Added route-level rendering recovery and fixed a React hook-order defect in Investigation Detail that could trigger React error #310 during API state transitions.
-- Added IPv6-safe process/network endpoint correlation and regression coverage.
-- Verified the backend regression suite at 42/42 passing.
-
-## 1.1.0 — Network Evidence
-
-- Added normalized `network_artifacts` collector.
-- Added Zeek conn.log/dns.log TSV ingestion.
-- Added Zeek JSON-lines ingestion.
-- Added bounded classic PCAP metadata extraction.
-- Added bounded PCAPNG metadata extraction with interface timestamp resolution.
-- Added persistent, content-addressed network evidence source registry.
-- Added network evidence upload/list/delete API.
-- Added request-scoped network source selection for the DSL.
-- Added network source provenance to reports.
-- Added network statistics to evidence and HTML reports.
-- Added Network Forensics console page and investigation source selection.
-- Added V1.1 regression and acceptance coverage.
-
-# JOCKY Changelog
-
-## 1.0.0 — Stable Forensic Triage
-
-### Core
-- Stabilized the FastAPI + SQLite investigation architecture.
-- Preserved the controlled lexer → parser → IR → interpreter execution path.
-- Added complete v1.0 acceptance coverage for all registered collectors and analysis rules.
-
-### Evidence collection
-- System information
-- Processes
-- Network connections
-- Logged-in users
-- Approved-directory file hashing
-- Scheduled tasks / cron
-- Startup items
-- Open files
-- Local users
-- Windows modules
-- Windows thread metadata
-- Windows virtual-memory metadata
-
-### Analysis
-- Missing executable paths
-- Suspicious executable locations
-- Process/network correlation
-- Scheduled-task anomalies
-- Startup anomalies
-- High-connection processes
-- Privileged-user anomalies
-- Windows module/injection indicators
-
-### Bytecode
-- HMAC-SHA256 signed bytecode
-- Signature verification before disassembly/execution
-- Structural and capability-boundary validation
-- Controlled reconstruction back through the normal interpreter
-
-### Reporting and integrity
-- SQLite investigation persistence
-- HTML reports
-- JSON report downloads
-- AES-256-GCM + RSA-OAEP encrypted reports
-- Script SHA-256 provenance
-- Report SHA-256 integrity verification
-- Explicit collector-error preservation
-
-### Remote operations
-- Agent registration and scoped tokens
-- Job dispatch/polling
-- Result and error submission
-- Heartbeats
-- Job lifecycle protection
-- Agent revocation
-- Completed-job import into persisted investigations
-
-### Scope boundary
-V1.0 does not introduce the later roadmap capabilities for Zeek/PCAP ingestion, network threat hunting, expanded Windows telemetry, PE analysis, DSL filtering/boolean/user-rule features, persistent agents, or large-scale optimization.
-
-## 1.3.1 — SPA Navigation Stability Hotfix
-
-- Added an application-root React error boundary so rendering failures in the shell/router tree cannot leave the console blank.
-- Kept route-level isolation and made recovery actions available without requiring a browser refresh.
-- Hardened dashboard rendering against incomplete/empty aggregate API arrays.
-- Preserved stale-request protection in the shared data-loading hook.
-- JSX syntax checked across the complete frontend source tree.
-
-## 1.3.0 — Windows Telemetry Expansion
-
-- Added bounded read-only Windows Event Log collector with controlled process, logon, privilege, service-change and PowerShell event families.
-- Added prioritized Sysmon event collector for Events 1, 3, 7, 8, 10, 11, 12/13/14 and 22.
-- Expanded process evidence with parent PID and bounded command-line metadata for PowerShell analysis.
-- Added PowerShell rules: encoded/hidden execution indicators, suspicious parent, network activity and child processes.
-- Added Windows service inventory and service-path review rules.
-- Added persistence correlation across startup/Registry Run keys, scheduled tasks and services.
-- Added Windows Telemetry UI and investigation-detail telemetry tab.
-- Added Windows telemetry HTML reporting and DSL example.
-- Hardened SPA route recovery and removed the InvestigationDetail React hook-order crash path.
-- 49 automated tests passing.
-
-## 1.7.0 — Remote Endpoint Operations
-
-- Persistent RANDAR remote-agent registry
-- Capability negotiation via agent heartbeat
-- Agent capability dashboard
-- Secure job nonce/expiration/signature metadata
-- Safe job cancellation and cancellation-aware result submission
-- RANDAR agent branding with JOCKY compatibility aliases
-- V1.7 regression coverage
+- Added explicit memory-forensics correlation findings and diagnostics.

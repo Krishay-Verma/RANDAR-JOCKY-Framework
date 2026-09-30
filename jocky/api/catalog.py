@@ -5,6 +5,7 @@ are metadata only and never affect execution."""
 from jocky.analysis.registry import list_rules
 from jocky.collectors.registry import list_collectors
 from jocky.language.interpreter import list_evidence_properties
+from jocky.analysis.software_catalog import PROFILES
 
 _COLLECTORS = {
     "system_info": "Host name, OS, architecture, CPU and memory.",
@@ -20,10 +21,25 @@ _COLLECTORS = {
     "modules": "Windows loaded DLL/EXE/SYS module inventory with bounded hashing of user-writable paths.",
     "threads": "Windows process-thread inventory using read-only thread metadata.",
     "memory_regions": "Windows virtual-memory metadata; no process memory is read or written.",
+    "driver_inventory": "Read-only Windows driver-service inventory with load state, hash, signer/version metadata, and vulnerable-driver correlation; no driver is loaded or modified.",
     "windows_event_logs": "Controlled Windows Event Log metadata: process creation, logon, privilege, service-change and PowerShell events.",
     "sysmon_events": "Bounded Sysmon Operational events: 1, 3, 7, 8, 10, 11, 12/13/14 and 22.",
     "services": "Windows service inventory with executable, account, state and start-mode metadata.",
     "pe_metadata": "Bounded read-only PE metadata for process/module files: architecture, sections, imports, exports, entropy, signature metadata and SHA-256.",
+    "wmi_event_subscriptions": "WMI permanent event filters/consumers/bindings under root\\subscription.",
+    "ifeo_persistence": "Image File Execution Options debugger/verifier configuration.",
+    "winlogon_persistence": "Winlogon Shell/Userinit and related logon configuration.",
+    "appinit_persistence": "AppInit_DLLs configuration in native and 32-bit registry views.",
+    "com_hijack_persistence": "HKCU CLSID COM server overrides.",
+    "bits_persistence": "Read-only BITS transfer job metadata.",
+    "all_users_startup": "Per-user Startup folder inventory across local profiles.",
+    "browser_extensions": "Chromium-family browser extension metadata for local profiles.",
+    "office_addins": "Per-user Microsoft Office Add-ins registry metadata.",
+    "lsa_auth_packages": "LSA Authentication Packages registry metadata.",
+    "advanced_persistence": "Composite read-only inventory of the additional Windows persistence surfaces.",
+    "clipboard_metadata": "Privacy-bounded clipboard availability/format/length metadata; clipboard contents are never returned.",
+    "browser_history_metadata": "Privacy-bounded browser history metadata with redacted domain hashes and timestamps; URLs/titles are not returned.",
+    "browser_cookie_metadata": "Privacy-bounded browser cookie metadata with redacted host hashes and security/expiry flags; values are never returned or decrypted.",
 }
 _RULES = {
     "missing_paths": ("informational", "Processes whose executable path is unreadable."),
@@ -39,6 +55,10 @@ _RULES = {
     "reflective_load_indicators": ("review", "Executable private memory retained as a reflective-loading lead."),
     "thread_hijacking_indicators": ("review", "Thread-density leads requiring additional thread-level review."),
     "injection_correlation": ("high", "Correlates module and executable-memory indicators on one process."),
+    "in_memory_execution_indicators": ("high", "Correlates memory, thread and module artifacts associated with fileless execution research."),
+    "byovd_driver_indicators": ("high", "Detects vulnerable-driver exposure using an operator-supplied catalog; no kernel modification is performed."),
+    "driver_forensics_exposure": ("high", "Correlates driver vulnerability, path, signature, and load-state indicators for defensive kernel review."),
+    "memory_forensics_correlation": ("high", "Correlates private executable memory, writable executable regions and thread-start metadata for defensive memory review."),
     "suspicious_dns_queries": ("review", "DNS queries matching configured review patterns."),
     "dns_entropy": ("review", "High-entropy DNS labels requiring contextual review."),
     "rare_domains": ("informational", "Domains that occur only once in a sufficiently diverse DNS evidence set."),
@@ -61,6 +81,19 @@ _RULES = {
     "suspicious_services": ("review", "Services whose executable path is writable or commonly user-writable."),
     "writable_service_paths": ("medium", "Service executable or parent directory is writable by the collecting account."),
     "persistence_correlation": ("review", "Common executable observed across multiple persistence surfaces."),
+    "persistence_cross_surface_correlation": ("review", "Executable path observed across multiple persistence surfaces."),
+    "persistence_privilege_correlation": ("medium", "Persistence-surface evidence overlaps with privilege-event telemetry."),
+    "service_configuration_anomalies": ("medium-high", "Unquoted service paths and untrusted ServiceDll configuration."),
+    "wmi_event_subscription": ("review", "WMI permanent event subscription metadata."),
+    "ifeo_debugger": ("medium-high", "Image File Execution Options debugger/verifier entries."),
+    "winlogon_persistence": ("medium", "Non-default Winlogon startup configuration."),
+    "appinit_dlls": ("medium", "AppInit DLL loading configuration."),
+    "com_hijack": ("review", "Per-user CLSID COM server overrides."),
+    "bits_persistence": ("review", "BITS transfer jobs that can provide execution/persistence context."),
+    "all_users_startup": ("review", "Startup folder entries across local profiles."),
+    "browser_extensions": ("review", "Browser extension inventory requiring signer/path context."),
+    "office_addins": ("review", "Office add-in startup configuration."),
+    "lsa_auth_packages": ("medium-high", "Non-default LSA authentication package configuration."),
     "unsigned_loaded_module": ("review", "Loaded PE module has no embedded Authenticode signature metadata."),
     "suspicious_imports": ("review", "PE imports associated with process injection or memory manipulation require contextual review."),
     "high_entropy_module": ("review", "PE or section entropy is unusually high and warrants file-level review."),
@@ -79,4 +112,5 @@ def build_catalog() -> dict:
         ],
         "properties": list_evidence_properties(),
         "severities": ["informational", "review_recommended", "medium", "high", "critical"],
+        "software_profiles": [{"key": p.key, "label": p.label, "category": p.category, "documented_kernel_component": p.documented_kernel_component} for p in PROFILES],
     }
